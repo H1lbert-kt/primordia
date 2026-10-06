@@ -1,0 +1,26 @@
+[project]
+name = "primordia"
+version = "0.1.0"
+description = "2D ecosystem simulation where neural creatures evolve by natural selection (no explicit fitness)"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "numba>=0.59",
+]
+
+[project.optional-dependencies]
+render = [
+    "pygame-ce>=2.5",
+    "matplotlib>=3.8",
+]
+dev = [
+    "pytest>=8",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
