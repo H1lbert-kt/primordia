@@ -27,7 +27,12 @@ def main() -> None:
     if not args.headless:
         raise SystemExit("interactive rendering arrives in stage 4; pass --headless")
 
-    cfg = Config(max_creatures=max(args.pop, 1), initial_creatures=args.pop)
+    # --pop is the *initial* population; keep room to grow (reproduction
+    # needs free slots) unless the user asks for a bigger starting world.
+    cfg = Config(
+        max_creatures=max(args.pop, Config().max_creatures),
+        initial_creatures=args.pop,
+    )
     warm_up_jit()
     w = World(cfg, seed=args.seed)
     start = time.perf_counter()

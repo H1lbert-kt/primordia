@@ -14,13 +14,15 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   README principal em **inglês**.
 
 ## Estado atual do repositório (verificado em 2026-10-07)
-- **Etapa 2 de 8 concluída**: `primordia/` ganhou `sensors.py` (raios +
-  cheiro + sensores internos) e `brain.py` (MLP `think` + `apply_actions`);
-  `config.py`/`world.py`/`step.py`/`bench.py` expandidos; testes novos em
-  `tests/test_brain.py` e `tests/test_sensors.py` (13 no total).
-  Não há README, CI, `opencode.json` nem renderização (etapa 4); genoma/muta-
-  ção/reprodução são etapa 3.
-- `pytest -q` (13 passed), `python -m primordia.bench`,
+- **Etapa 3 de 8 concluída**: `primordia/genome.py` (reprodução assexuada
+  serial: split de energia, mutação com clamps, RNG Numba semeado);
+  `config.py` ganhou `reproduce_threshold/child_fraction/mutation_* /
+  move_cost`; `step.py` tem 10 fases (nova `reproduce` pós-`deaths`) e
+  contadores `world.births/deaths_famine/deaths_age`. Testes novos em
+  `tests/test_genome.py` (22 no total).
+- Não há README, CI, `opencode.json` nem renderização (etapa 4); predação e
+  dieta ativa são etapa 5; stats.py completo e gráficos, etapa 6.
+- `pytest -q` (22 passed), `python -m primordia.bench`,
   `python -m primordia.bench --profile` e
   `run.py --headless --ticks N` funcionam. `run.py` sem `--headless` e
   `--load saves/...` só passam a funcionar nas etapas 4 e 7.
@@ -105,15 +107,28 @@ run.py           # CLI: --seed --headless --ticks --load --config
   a N=2000: `perceive` 64% (amostragem de raios, leituras aleatórias em
   `food`/`cell_counts`), `think` 25% (12 `tanh` por criatura). O piso de
   30 ticks/s é cumprido com 27x de margem.
+- **Etapa 3 (2026-10-07): sem regressão medida.** O ticks/s oscila 2–4x
+  *entre processos* nos dois palcos (ruído de threads Numba/térmico) — número
+  isolado não serve para comparar etapas. Protocolo: A/B alternado na mesma
+  sessão (clone do HEAD anterior em `/tmp` + `--profile`). Resultado:
+  `sum(phases)` a N=2000 = 2691/2292 µs (etapa 3) vs 3297/2375 µs (etapa 2);
+  `reproduce` = 8.5 µs (0.3%). Pior caso observado da etapa 3: ~110 ticks/s
+  a N=2000 (piso 30 cumprido com ~4x). Em 5000 ticks com população crescendo
+  (500→2000 cap): ~284 ticks/s, dinâmica em `--profile`/testes de balanço.
 - O Numba usa todas as 8 threads lógicas: rode benchmark e simulação em
   **sequência**. Dois processos Numba paralelos se pisoteiam e o ticks/s cai
   ~20x (medido em 2026-10-06: 19 ticks/s em paralelo vs ~8000 em sequência).
 
 ## Determinismo
-- Um único `numpy.random.Generator` (`default_rng(seed)`) no mundo.
+- Um único `numpy.random.Generator` (`default_rng(seed)`) no mundo para
+  desenhos em Python (spawn/inicialização).
 - O gerador do Numba é separado do NumPy: se usar `np.random` dentro de
   `@njit`, semeie-o explicitamente com `np.random.seed(...)` dentro de uma
-  função `@njit`.
+  função `@njit` (é o caso de `genome.seed_numba_rng`).
+- Esse stream do Numba é **global por processo**: dois mundos avançando
+  intercalados compartilham desenhos e divergem. Com reprodução ativa,
+  rode mundos em **sequência** (mundo A completo, depois B) — CLI e bench
+  já são sequenciais; testes seguem a mesma regra.
 - Dentro de `prange`, **não** gere números aleatórios. Pré-gere os arrays de
   ruído fora do bloco paralelo e passe-os como argumento.
 - Nunca itere sobre `set`/`dict` onde a ordem afete o resultado.

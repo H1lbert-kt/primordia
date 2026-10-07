@@ -7,17 +7,22 @@ profiler in ``bench``):
 
     0. rebuild creature-count grid (serial; the spatial grid sensors read)
     1. grow food        (parallel over cells; models photosynthesis)
-    2. age + metabolize (parallel over slots, alive only)
+    2. age + metabolize (parallel over slots, alive only; energy drains by
+       metabolic_cost plus move_cost * |vel|^2)
     3. perceive         (parallel: rays + smell + internal -> sensor_buf)
     4. think            (parallel: MLP forward -> hidden_buf, raw actions)
     5. apply actions    (parallel: accel/turn -> vel/angle, eat gate)
     6. eat              (serial: shared cells; extraction * gate)
     7. integrate motion + wrap borders (parallel, alive only)
     8. deaths           (serial: kill, zero energy, push slot to free-list)
+    9. reproduce        (serial: energy >= threshold -> split + mutate child;
+       uses the slots freed in phase 8; newborns skip perceive/think until
+       the next tick)
 
 Perception uses positions from the start of the tick, movement is applied
-afterwards. No random numbers are drawn inside any kernel: draws happen only
-in ``World.__init__``/``World.spawn`` (NumPy Generator), never inside prange.
+afterwards. No random numbers are drawn inside any parallel kernel. The
+serial reproduce kernel draws from the Numba RNG, seeded once at World
+construction (see genome.py); it is never touched by prange.
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ import numpy as np
 from numba import njit, prange
 
 from .brain import apply_actions, think
+from .genome import _reproduce
 from .sensors import perceive
 from .world import World
 
@@ -40,12 +46,18 @@ def _grow_food(food: np.ndarray, rate: np.float32, capacity: np.float32) -> None
 
 @njit(cache=True, parallel=True)
 def _age_and_metabolize(
-    energy: np.ndarray, age: np.ndarray, alive: np.ndarray, cost: np.float32
+    energy: np.ndarray,
+    age: np.ndarray,
+    alive: np.ndarray,
+    vel: np.ndarray,
+    cost: np.float32,
+    move_cost: np.float32,
 ) -> None:
     for i in prange(alive.size):
         if alive[i]:
             age[i] = age[i] + 1
-            energy[i] = energy[i] - cost
+            speed2 = vel[i, 0] * vel[i, 0] + vel[i, 1] * vel[i, 1]
+            energy[i] = energy[i] - cost - move_cost * speed2
 
 
 @njit(cache=True)
@@ -117,15 +129,25 @@ def _kill(
     free_list: np.ndarray,
     free_count: np.int32,
     max_age: np.int32,
-) -> np.int32:
-    """Kill and recycle in one serial pass (ascending slot order = deterministic)."""
+) -> tuple[int, int, int]:
+    """Kill and recycle in one serial pass (ascending slot order = deterministic).
+
+    Returns ``(free_count, deaths_famine, deaths_age)``; a creature dying of
+    both counts as famine (checked first).
+    """
+    n_famine = 0
+    n_age = 0
     for i in range(alive.size):
         if alive[i] and (energy[i] <= 0.0 or age[i] >= max_age):
+            if energy[i] <= 0.0:
+                n_famine = n_famine + 1
+            else:
+                n_age = n_age + 1
             alive[i] = False
             energy[i] = 0.0
             free_list[free_count] = i
             free_count = free_count + 1
-    return free_count
+    return free_count, n_famine, n_age
 
 
 def phase_rebuild_counts(world: World) -> None:
@@ -140,7 +162,12 @@ def phase_grow_food(world: World) -> None:
 def phase_age_and_metabolize(world: World) -> None:
     cfg = world.config
     _age_and_metabolize(
-        world.energy, world.age, world.alive, np.float32(cfg.metabolic_cost)
+        world.energy,
+        world.age,
+        world.alive,
+        world.vel,
+        np.float32(cfg.metabolic_cost),
+        np.float32(cfg.move_cost),
     )
 
 
@@ -232,16 +259,43 @@ def phase_integrate(world: World) -> None:
 
 def phase_deaths(world: World) -> None:
     cfg = world.config
-    world.free_count = int(
-        _kill(
-            world.energy,
-            world.age,
-            world.alive,
-            world.free_list,
-            np.int32(world.free_count),
-            np.int32(cfg.max_age),
-        )
+    free_count, n_famine, n_age = _kill(
+        world.energy,
+        world.age,
+        world.alive,
+        world.free_list,
+        np.int32(world.free_count),
+        np.int32(cfg.max_age),
     )
+    world.free_count = int(free_count)
+    world.deaths_famine += int(n_famine)
+    world.deaths_age += int(n_age)
+
+
+def phase_reproduce(world: World) -> None:
+    cfg = world.config
+    births, free_count = _reproduce(
+        world.pos,
+        world.vel,
+        world.age,
+        world.angle,
+        world.energy,
+        world.alive,
+        world.genome,
+        world.species_id,
+        world.parent_id,
+        world.free_list,
+        np.int32(world.free_count),
+        np.float32(cfg.reproduce_threshold),
+        np.float32(cfg.child_fraction),
+        np.float32(cfg.mutation_rate),
+        np.float32(cfg.mutation_std),
+        np.float32(cfg.trait_mutation_std),
+        np.int32(cfg.brain_params),
+        np.float32(max(cfg.width, cfg.height)),
+    )
+    world.free_count = int(free_count)
+    world.births += int(births)
 
 
 # Tick phases in execution order; consumed by `python -m primordia.bench --profile`.
@@ -255,6 +309,7 @@ PHASES = (
     ("eat", phase_eat),
     ("integrate", phase_integrate),
     ("deaths", phase_deaths),
+    ("reproduce", phase_reproduce),
 )
 
 

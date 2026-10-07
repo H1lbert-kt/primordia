@@ -54,6 +54,16 @@ class Config:
     max_speed: float = 4.0  # default genome trait: world units per tick
     max_turn: float = 0.6  # radians per tick at |turn| = 1
 
+    # --- reproduction and mutation (stage 3) ---
+    reproduce_threshold: float = 100.0  # energy needed to split in two
+    child_fraction: float = 0.5  # share of parent's energy given to child
+    mutation_rate: float = 0.01  # probability per gene of being mutated
+    mutation_std: float = 0.05  # additive std for brain genes
+    trait_mutation_std: float = 0.10  # relative std for multiplicative traits
+
+    # --- movement cost ---
+    move_cost: float = 0.05  # energy per tick at speed 1 (quadratic in |vel|)
+
     def __post_init__(self) -> None:
         if self.width <= 0.0 or self.height <= 0.0:
             raise ValueError("world dimensions must be positive")
@@ -81,6 +91,16 @@ class Config:
             raise ValueError("max_turn must be in (0, pi]")
         if self.weight_init_std < 0.0 or self.smell_radius_cells < 0:
             raise ValueError("weight_init_std and smell_radius_cells must be >= 0")
+        if self.reproduce_threshold <= 0.0:
+            raise ValueError("reproduce_threshold must be positive")
+        if not 0.0 < self.child_fraction < 1.0:
+            raise ValueError("child_fraction must be in (0, 1)")
+        if not 0.0 <= self.mutation_rate <= 1.0:
+            raise ValueError("mutation_rate must be in [0, 1]")
+        if self.mutation_std < 0.0 or self.trait_mutation_std < 0.0:
+            raise ValueError("mutation_std and trait_mutation_std must be >= 0")
+        if self.move_cost < 0.0:
+            raise ValueError("move_cost must be >= 0")
 
     @property
     def grid_shape(self) -> tuple[int, int]:

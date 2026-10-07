@@ -22,6 +22,7 @@ import numpy as np
 from numba import njit
 
 from .config import Config
+from .genome import seed_numba_rng
 
 
 @njit(cache=True)
@@ -56,6 +57,7 @@ class World:
     def __init__(self, config: Config, seed: int = 0) -> None:
         self.config = config
         self.rng = np.random.default_rng(seed)
+        seed_numba_rng(seed)  # second stream, used only by genome._reproduce
         n = config.max_creatures
 
         self.pos = np.zeros((n, 2), dtype=np.float32)
@@ -96,6 +98,11 @@ class World:
         )
 
         self.tick = 0
+        # Cumulative counters for balance reporting (stats.py, stage 6, will
+        # consume these; Python ints, never allocated inside a tick).
+        self.births = 0
+        self.deaths_famine = 0
+        self.deaths_age = 0
         self.spawn(config.initial_creatures)
 
     @property
@@ -119,8 +126,9 @@ class World:
     def spawn(self, count: int) -> np.ndarray:
         """Pop ``count`` slots from the free-list and initialize them.
 
-        Vectorized on purpose: stage-3 reproduction will call this once per
-        tick with all newborns of that tick. Returns the slot indices.
+        Vectorized: creates all ``count`` newborns in one pass. Used for the
+        initial population (and manual resets); tick-born newborns are
+        initialized inside ``genome._reproduce`` instead. Returns the slots.
         """
         if count > self.free_count:
             raise ValueError(f"not enough free slots: {count} > {self.free_count}")

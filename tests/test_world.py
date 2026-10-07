@@ -53,14 +53,22 @@ def test_invariants_after_1000_ticks() -> None:
 
 def test_determinism_same_seed() -> None:
     cfg = make_config(max_creatures=100, initial_creatures=100)
+    # Worlds run sequentially: the Numba RNG (used by reproduction) is a
+    # process-global stream, so interleaved worlds would share draws.
     w1 = World(cfg, seed=42)
-    w2 = World(cfg, seed=42)
     for _ in range(500):
         advance(w1)
+    w2 = World(cfg, seed=42)
+    for _ in range(500):
         advance(w2)
     arrays = ("pos", "vel", "angle", "energy", "age", "genome", "species_id", "parent_id", "alive", "food")
     for name in arrays:
         assert np.array_equal(getattr(w1, name), getattr(w2, name)), name
+    assert (w1.births, w1.deaths_famine, w1.deaths_age) == (
+        w2.births,
+        w2.deaths_famine,
+        w2.deaths_age,
+    )
 
     w3 = World(cfg, seed=43)
     for _ in range(500):
@@ -75,6 +83,7 @@ def test_energy_conservation_without_growth_or_deaths() -> None:
         initial_energy=1000.0,
         metabolic_cost=0.1,
         food_growth_rate=0.0,  # food then only transfers to creatures
+        move_cost=0.0,  # isolate the food <-> energy accounting from balance
     )
     w = World(cfg, seed=7)
     food0 = float(w.food.sum(dtype=np.float64))
