@@ -14,18 +14,20 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   README principal em **inglês**.
 
 ## Estado atual do repositório (verificado em 2026-10-07)
-- **Etapa 3 de 8 concluída**: `primordia/genome.py` (reprodução assexuada
-  serial: split de energia, mutação com clamps, RNG Numba semeado);
-  `config.py` ganhou `reproduce_threshold/child_fraction/mutation_* /
-  move_cost`; `step.py` tem 10 fases (nova `reproduce` pós-`deaths`) e
-  contadores `world.births/deaths_famine/deaths_age`. Testes novos em
-  `tests/test_genome.py` (22 no total).
-- Não há README, CI, `opencode.json` nem renderização (etapa 4); predação e
-  dieta ativa são etapa 5; stats.py completo e gráficos, etapa 6.
-- `pytest -q` (22 passed), `python -m primordia.bench`,
-  `python -m primordia.bench --profile` e
-  `run.py --headless --ticks N` funcionam. `run.py` sem `--headless` e
-  `--load saves/...` só passam a funcionar nas etapas 4 e 7.
+- **Etapa 4 de 8 concluída**:
+  pacote `primordia/render/` — `settings.py` (Settings: geometria/paleta),
+  `camera.py` (zoom/pan/pan toroidal com cache de índices), `draw.py`
+  (comida via LUT+gather, criaturas em scatter por bucket de raio, overlay
+  de raios/anel/cheiro), `panel.py` (sensores, heatmaps W1|b1/W2|b2, traços,
+  HUD), `app.py` (`run_app`, laço com pausa/velocidades/follow/seleção);
+  `run.py` ganhou modo janela + `--screenshot` + `--select`. Testes novos em
+  `tests/test_render_guard.py` (24 no total): núcleo nunca importa pygame
+  (subprocesso) e janela idêntica ao headless (dummy driver).
+- Predação e dieta ativa são etapa 5; stats.py completo e gráficos, etapa 6;
+  `io.py` e `--load` (etapa 7); README/GIFs, etapa 8.
+- `pytest -q` (24 passed), `python -m primordia.bench [--profile]`,
+  `run.py --headless --ticks N` e `run.py --seed 42` (janela) funcionam.
+  `run.py --load` só passa a funcionar na etapa 7.
 - **Planos das etapas** ficam em `.opencode/plans/*.md` (não versionados).
 - Ambiente em `.venv` (Python **3.14.7**): numpy 2.5.3, numba 0.68.0,
   pygame-ce 2.5.8, matplotlib 3.11.2, pytest 9.1.1. Verificado: `@njit` +
@@ -58,7 +60,7 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
 4. **Dados em arrays (SoA).** Uma criatura é um índice, nunca um objeto.
 5. **Parâmetros em config.** Nenhum número mágico de balanceamento no código.
 
-## Estrutura (alvo; nada disso existe ainda)
+## Estrutura (alvo)
 ```
 primordia/
   config.py      # dataclass Config (todos os parâmetros de balanceamento)
@@ -73,6 +75,7 @@ primordia/
 tests/
 experiments/     # um script + um README curto por experimento
 run.py           # CLI: --seed --headless --ticks --load --config
+                 #      --screenshot --select (janela)
 ```
 
 ## Modelo de dados
@@ -115,6 +118,14 @@ run.py           # CLI: --seed --headless --ticks --load --config
   `reproduce` = 8.5 µs (0.3%). Pior caso observado da etapa 3: ~110 ticks/s
   a N=2000 (piso 30 cumprido com ~4x). Em 5000 ticks com população crescendo
   (500→2000 cap): ~284 ticks/s, dinâmica em `--profile`/testes de balanço.
+- **Etapa 4 (janela pygame, 2026-10-07):** N=2000, 300 ticks, fps médio
+  oscila **21–47** conforme a carga da máquina (o mesmo box roda
+  opencode/Brave/gnome-shell; rode `uptime` junto da medição e compare A/B
+  alternado na mesma sessão). Pipeline isolado `SDL_VIDEODRIVER=dummy`:
+  38–47 fps; X real: 26–43 fps (load 2–6). Sob load 8–12 cai a ~24–27 —
+  o limitante é a carga do sistema, não o draw (por frame: draw_food ~5 ms,
+  panel ~2 ms, stamp <1 ms). Cuidado ao ler buckets: acumulam **segundos**;
+  `s/frame` sem ×1000 mostra 0.04 quando o real é **40 ms**.
 - O Numba usa todas as 8 threads lógicas: rode benchmark e simulação em
   **sequência**. Dois processos Numba paralelos se pisoteiam e o ticks/s cai
   ~20x (medido em 2026-10-06: 19 ticks/s em paralelo vs ~8000 em sequência).
@@ -169,7 +180,9 @@ Simulações assim falham por balanceamento, não por bug. Portanto:
 ```bash
 python run.py --seed 42 --headless --ticks 10000   # simulação sem janela
 python run.py --seed 42                            # com visualização
-python run.py --load saves/world.npz               # retomar mundo
+python run.py --seed 42 --ticks 300 --select 1 \
+    --screenshot out.png                           # janela com evidência
+python run.py --load saves/world.npz               # retomar mundo (etapa 7)
 pytest -q                                          # testes
 python -m primordia.bench                          # benchmark de ticks/s
 ```
@@ -197,7 +210,8 @@ antes de dizer que uma mudança de tick não regrediu desempenho.
 - Reprodução: filho herda traços do pai com mutação; energia é dividida
   (sem criar energia do nada).
 - Salvar/carregar: `load(save(world))` continua a simulação de forma idêntica.
-- Renderização não é testada em CI; o núcleo sim, sim.
+- Renderização: só testes de guarda/smoke (núcleo sem pygame; janela dummy
+  idêntica ao headless). Não há CI gráfica; o núcleo sim, sim.
 
 ## Estilo de código
 - Type hints em funções públicas; docstring curta dizendo *o quê e por quê*.
