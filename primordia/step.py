@@ -1,17 +1,23 @@
 """The tick: the only function that advances the world.
 
 Per-creature logic lives in compiled kernels (``@njit``); there is no Python
-loop over creatures anywhere. Kernel order inside :func:`advance` is part of
-the deterministic contract:
+loop over creatures anywhere. Phase order inside :func:`advance` is part of
+the deterministic contract (``PHASES`` exposes the same sequence for the
+profiler in ``bench``):
 
-    1. grow food      (parallel over cells; models photosynthesis)
+    0. rebuild creature-count grid (serial; the spatial grid sensors read)
+    1. grow food        (parallel over cells; models photosynthesis)
     2. age + metabolize (parallel over slots, alive only)
-    3. eat            (serial: several creatures share a cell; parallel would race)
-    4. integrate motion + wrap borders (parallel, alive only)
-    5. deaths         (serial: kill, zero energy, push slot to free-list)
+    3. perceive         (parallel: rays + smell + internal -> sensor_buf)
+    4. think            (parallel: MLP forward -> hidden_buf, raw actions)
+    5. apply actions    (parallel: accel/turn -> vel/angle, eat gate)
+    6. eat              (serial: shared cells; extraction * gate)
+    7. integrate motion + wrap borders (parallel, alive only)
+    8. deaths           (serial: kill, zero energy, push slot to free-list)
 
-No random numbers are drawn inside any kernel: draws happen only in
-``World.__init__``/``World.spawn`` (NumPy Generator), never inside ``prange``.
+Perception uses positions from the start of the tick, movement is applied
+afterwards. No random numbers are drawn inside any kernel: draws happen only
+in ``World.__init__``/``World.spawn`` (NumPy Generator), never inside prange.
 """
 
 from __future__ import annotations
@@ -19,7 +25,8 @@ from __future__ import annotations
 import numpy as np
 from numba import njit, prange
 
-from .config import Config
+from .brain import apply_actions, think
+from .sensors import perceive
 from .world import World
 
 
@@ -47,12 +54,14 @@ def _eat(
     energy: np.ndarray,
     alive: np.ndarray,
     food: np.ndarray,
+    actions: np.ndarray,
     cell_w: np.float32,
     cell_h: np.float32,
     gw: np.int32,
     gh: np.int32,
     eat_rate: np.float32,
 ) -> None:
+    """Serial: shared food cells would make a parallel scatter a race."""
     for i in range(alive.size):
         if not alive[i]:
             continue
@@ -69,6 +78,7 @@ def _eat(
         take = food[cy, cx]
         if take > eat_rate:
             take = eat_rate
+        take = take * actions[i, 2]  # eat gate from the brain
         if take > 0.0:
             food[cy, cx] = food[cy, cx] - take
             energy[i] = energy[i] + take
@@ -118,26 +128,110 @@ def _kill(
     return free_count
 
 
-def advance(world: World) -> None:
-    """Advance the simulation by one tick, modifying ``world`` in place."""
+def phase_rebuild_counts(world: World) -> None:
+    world.rebuild_counts()
+
+
+def phase_grow_food(world: World) -> None:
     cfg = world.config
     _grow_food(world.food, np.float32(cfg.food_growth_rate), np.float32(cfg.food_capacity))
+
+
+def phase_age_and_metabolize(world: World) -> None:
+    cfg = world.config
     _age_and_metabolize(
         world.energy, world.age, world.alive, np.float32(cfg.metabolic_cost)
     )
+
+
+def phase_perceive(world: World) -> None:
+    cfg = world.config
+    gh, gw = world.food.shape
+    cell_w = float(world.cell_w)
+    cell_h = float(world.cell_h)
+    step_len = cell_w if cell_w < cell_h else cell_h
+    energy_scale = cfg.initial_energy * 2.0
+    if energy_scale <= 0.0:
+        energy_scale = 1.0
+    perceive(
+        world.pos,
+        world.angle,
+        world.vel,
+        world.energy,
+        world.alive,
+        world.genome,
+        world.food,
+        world.cell_counts,
+        world.ray_unit,
+        world.sensor_buf,
+        np.int32(cfg.n_rays),
+        np.int32(cfg.smell_radius_cells),
+        np.int32(cfg.brain_params),
+        np.float32(1.0 / cell_w),
+        np.float32(1.0 / cell_h),
+        np.float32(step_len),
+        np.int32(gw),
+        np.int32(gh),
+        np.float32(cfg.width),
+        np.float32(cfg.height),
+        np.float32(cfg.food_capacity),
+        np.float32(energy_scale),
+    )
+
+
+def phase_think(world: World) -> None:
+    cfg = world.config
+    think(
+        world.sensor_buf,
+        world.hidden_buf,
+        world.actions,
+        world.alive,
+        world.genome,
+        np.int32(cfg.sensor_input_dim),
+        np.int32(cfg.hidden_size),
+        np.int32(cfg.N_OUTPUTS),
+    )
+
+
+def phase_apply_actions(world: World) -> None:
+    cfg = world.config
+    apply_actions(
+        world.actions,
+        world.angle,
+        world.vel,
+        world.alive,
+        world.genome,
+        np.float32(cfg.max_turn),
+        np.int32(cfg.brain_params),
+    )
+
+
+def phase_eat(world: World) -> None:
+    cfg = world.config
     gh, gw = world.food.shape
     _eat(
         world.pos,
         world.energy,
         world.alive,
         world.food,
+        world.actions,
         world.cell_w,
         world.cell_h,
         np.int32(gw),
         np.int32(gh),
         np.float32(cfg.eat_rate),
     )
-    _integrate(world.pos, world.vel, world.alive, np.float32(cfg.width), np.float32(cfg.height))
+
+
+def phase_integrate(world: World) -> None:
+    cfg = world.config
+    _integrate(
+        world.pos, world.vel, world.alive, np.float32(cfg.width), np.float32(cfg.height)
+    )
+
+
+def phase_deaths(world: World) -> None:
+    cfg = world.config
     world.free_count = int(
         _kill(
             world.energy,
@@ -148,4 +242,24 @@ def advance(world: World) -> None:
             np.int32(cfg.max_age),
         )
     )
+
+
+# Tick phases in execution order; consumed by `python -m primordia.bench --profile`.
+PHASES = (
+    ("rebuild_counts", phase_rebuild_counts),
+    ("grow_food", phase_grow_food),
+    ("age_metabolize", phase_age_and_metabolize),
+    ("perceive", phase_perceive),
+    ("think", phase_think),
+    ("apply_actions", phase_apply_actions),
+    ("eat", phase_eat),
+    ("integrate", phase_integrate),
+    ("deaths", phase_deaths),
+)
+
+
+def advance(world: World) -> None:
+    """Advance the simulation by one tick, modifying ``world`` in place."""
+    for _name, phase in PHASES:
+        phase(world)
     world.tick += 1

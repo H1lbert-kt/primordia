@@ -7,6 +7,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
+from primordia import step
 from primordia.config import Config
 from primordia.step import advance
 from primordia.world import World
@@ -90,6 +91,7 @@ def test_energy_conservation_without_growth_or_deaths() -> None:
 
 
 def test_wrap_borders() -> None:
+    # Unit-test the kernel directly: `advance` overwrites vel from brain outputs.
     cfg = make_config(width=100.0, height=100.0, max_creatures=20, initial_creatures=20)
     w = World(cfg, seed=3)
     w.vel[:, 0] = 7.0
@@ -97,13 +99,13 @@ def test_wrap_borders() -> None:
     slot = np.flatnonzero(w.alive)[0]
     w.pos[slot] = (99.0, 1.0)
 
-    advance(w)
+    step._integrate(w.pos, w.vel, w.alive, np.float32(100.0), np.float32(100.0))
     assert w.pos[slot, 0] == pytest.approx(6.0)
     assert w.pos[slot, 1] == pytest.approx(96.0)
 
     limit = np.array([100.0, 100.0], dtype=np.float32)
     for _ in range(50):
-        advance(w)
+        step._integrate(w.pos, w.vel, w.alive, np.float32(100.0), np.float32(100.0))
         assert np.all(w.pos >= 0.0) and np.all(w.pos < limit)
 
 

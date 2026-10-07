@@ -13,11 +13,15 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
 - Código, identificadores, comentários, docstrings, mensagens de commit e
   README principal em **inglês**.
 
-## Estado atual do repositório (verificado em 2026-10-06)
-- **Etapa 1 de 8 concluída**: `primordia/` (config, world, step, bench),
-  `run.py`, `tests/test_world.py` (6 testes), `pyproject.toml`, `.gitignore`.
-  Não há README, CI, `opencode.json` nem renderização (etapa 4).
-- `pytest -q` (6 passed), `python -m primordia.bench` e
+## Estado atual do repositório (verificado em 2026-10-07)
+- **Etapa 2 de 8 concluída**: `primordia/` ganhou `sensors.py` (raios +
+  cheiro + sensores internos) e `brain.py` (MLP `think` + `apply_actions`);
+  `config.py`/`world.py`/`step.py`/`bench.py` expandidos; testes novos em
+  `tests/test_brain.py` e `tests/test_sensors.py` (13 no total).
+  Não há README, CI, `opencode.json` nem renderização (etapa 4); genoma/muta-
+  ção/reprodução são etapa 3.
+- `pytest -q` (13 passed), `python -m primordia.bench`,
+  `python -m primordia.bench --profile` e
   `run.py --headless --ticks N` funcionam. `run.py` sem `--headless` e
   `--load saves/...` só passam a funcionar nas etapas 4 e 7.
 - **Planos das etapas** ficam em `.opencode/plans/*.md` (não versionados).
@@ -95,6 +99,12 @@ run.py           # CLI: --seed --headless --ticks --load --config
 - Baseline da etapa 1 (última medição 2026-10-06, i5-8265U):
   11240/7874/3999 ticks/s a 500/2000/5000 criaturas (~2x de variação entre
   execuções conforme a carga da máquina; compare sempre na mesma sessão).
+- Baseline da etapa 2 (sensores + cérebro ativos, medição 2026-10-07, i5-8265U):
+  ~2500/830/300 ticks/s a 500/2000/5000 criaturas (mesma variância de carga;
+  1 outlier de 586 a N=2000 sob load 1.8). Gargalo medido com `--profile`
+  a N=2000: `perceive` 64% (amostragem de raios, leituras aleatórias em
+  `food`/`cell_counts`), `think` 25% (12 `tanh` por criatura). O piso de
+  30 ticks/s é cumprido com 27x de margem.
 - O Numba usa todas as 8 threads lógicas: rode benchmark e simulação em
   **sequência**. Dois processos Numba paralelos se pisoteiam e o ticks/s cai
   ~20x (medido em 2026-10-06: 19 ticks/s em paralelo vs ~8000 em sequência).
