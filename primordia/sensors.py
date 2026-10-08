@@ -6,13 +6,15 @@ Input vector layout (``Config.sensor_input_dim`` floats, written into
     [0 : n_rays)            food energy summed along each ray / (capacity * steps)
     [n_rays : 2*n_rays)     creatures in cells crossed by each ray / steps
                             (own cell subtracted, so no self-detection)
-    [2n : 2n+2)             smell: food and creatures in (2r+1)^2 cells around
-                            the creature (own creature subtracted)
-    [2n+2 : 2n+4)           internal: energy / (2 * initial_energy), |vel| / max_speed
+    [2n : 2n+3)             smell: food, creatures and meat (sum of the diet
+                            trait per cell, i.e. "how much prey is near") in
+                            (2r+1)^2 cells around the creature (self excluded)
+    [2n+3 : 2n+5)           internal: energy / (2 * initial_energy), |vel| / max_speed
 
 Rays march in steps of one cell up to the creature's ``vision_range`` body
 trait, wrapping toroidally like the rest of the world. Creature counts come
-from ``World.cell_counts`` (rebuilt every tick): O(cells + N), never O(N^2).
+from ``World.cell_counts`` and the meat smell from ``World.cell_diet`` (both
+rebuilt every tick): O(cells + N), never O(N^2).
 No random numbers are drawn in this module.
 """
 
@@ -34,6 +36,7 @@ def perceive(
     genome: np.ndarray,
     food: np.ndarray,
     cell_counts: np.ndarray,
+    cell_diet: np.ndarray,
     ray_unit: np.ndarray,
     sensor_buf: np.ndarray,
     n_rays: np.int32,
@@ -124,6 +127,7 @@ def perceive(
         # smell: everything in the neighbourhood, self excluded
         sf = np.float32(0.0)
         sc = np.float32(0.0)
+        sm = np.float32(0.0)
         for dy in range(-smell_r, smell_r + 1):
             for dx in range(-smell_r, smell_r + 1):
                 iy = iy0 + dy
@@ -138,13 +142,18 @@ def perceive(
                     ix = ix - gw
                 sf = sf + food[iy, ix]
                 sc = sc + np.float32(cell_counts[iy, ix])
+                sm = sm + cell_diet[iy, ix]
         sensor_buf[i, base] = sf * inv_cap * inv_smell
         sensor_buf[i, base + 1] = (sc - np.float32(1.0)) * inv_smell
+        # meat smell excludes my own diet contribution (like the creature count)
+        sensor_buf[i, base + 2] = (
+            sm - genome[i, traits_off + 3]
+        ) * inv_smell
 
         # internal sensors
         speed = math.sqrt(vel[i, 0] * vel[i, 0] + vel[i, 1] * vel[i, 1])
-        sensor_buf[i, base + 2] = energy[i] * inv_e
+        sensor_buf[i, base + 3] = energy[i] * inv_e
         if max_speed_trait > 0.0:
-            sensor_buf[i, base + 3] = np.float32(speed) / max_speed_trait
+            sensor_buf[i, base + 4] = np.float32(speed) / max_speed_trait
         else:
-            sensor_buf[i, base + 3] = 0.0
+            sensor_buf[i, base + 4] = 0.0

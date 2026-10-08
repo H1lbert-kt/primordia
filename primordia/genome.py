@@ -13,7 +13,8 @@ Diet is additive because it starts at 0 (herbivore) and a multiplicative
 mutation could never make it leave zero. After mutation, traits are clamped
 to physically valid ranges (``max_dim`` caps speed and vision: on a torus,
 sensing or moving farther than the world itself is redundant, and the cap
-bounds ray sampling cost).
+bounds ray sampling cost; ``max_size`` caps contact reach so neighbour scans
+stay bounded).
 
 Determinism: the serial kernel draws from the Numba RNG, which is a global
 stream seeded once at ``World`` construction (``seed_numba_rng``). Because the
@@ -59,6 +60,7 @@ def _reproduce(
     trait_std: np.float32,
     traits_off: np.int32,
     max_dim: np.float32,
+    max_size: np.float32,
 ) -> tuple[int, int]:
     """One serial pass: split every eligible parent that has a free slot.
 
@@ -105,6 +107,8 @@ def _reproduce(
             v = genome[child, t + 1] * np.exp(np.random.normal(0.0, trait_std))
             if not (v > TRAIT_EPS):
                 v = TRAIT_EPS
+            if v > max_size:
+                v = max_size
             genome[child, t + 1] = v
         # vision_range
         if np.random.random() < mutation_rate:

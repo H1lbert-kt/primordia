@@ -5,7 +5,8 @@ loop over creatures anywhere. Phase order inside :func:`advance` is part of
 the deterministic contract (``PHASES`` exposes the same sequence for the
 profiler in ``bench``):
 
-    0. rebuild creature-count grid (serial; the spatial grid sensors read)
+    0. rebuild creature grid  (serial; counts, diet sums and CSR cell lists
+       that sensors and bite read)
     1. grow food        (parallel over cells; models photosynthesis)
     2. age + metabolize (parallel over slots, alive only; energy drains by
        metabolic_cost plus move_cost * |vel|^2)
@@ -13,16 +14,20 @@ profiler in ``bench``):
     4. think            (parallel: MLP forward -> hidden_buf, raw actions)
     5. apply actions    (parallel: accel/turn -> vel/angle, eat gate)
     6. eat              (serial: shared cells; extraction * gate)
-    7. integrate motion + wrap borders (parallel, alive only)
-    8. deaths           (serial: kill, zero energy, push slot to free-list)
-    9. reproduce        (serial: energy >= threshold -> split + mutate child;
-       uses the slots freed in phase 8; newborns skip perceive/think until
-       the next tick)
+    7. bite             (serial: contact predation; gate * diet budget, energy
+       transfer at bite_efficiency, prey at 0 energy is killed here and
+       counted as predation)
+    8. integrate motion + wrap borders (parallel, alive only)
+    9. deaths           (serial: kill, zero energy, push slot to free-list)
+    10. reproduce       (serial: energy >= threshold -> split + mutate child;
+       uses the slots freed in phases 7 and 9; newborns skip perceive/think
+       until the next tick)
 
 Perception uses positions from the start of the tick, movement is applied
-afterwards. No random numbers are drawn inside any parallel kernel. The
-serial reproduce kernel draws from the Numba RNG, seeded once at World
-construction (see genome.py); it is never touched by prange.
+afterwards (bite uses those same positions). No random numbers are drawn
+inside any parallel kernel. The serial reproduce kernel draws from the Numba
+RNG, seeded once at World construction (see genome.py); it is never touched
+by prange or by bite.
 """
 
 from __future__ import annotations
@@ -189,6 +194,7 @@ def phase_perceive(world: World) -> None:
         world.genome,
         world.food,
         world.cell_counts,
+        world.cell_diet,
         world.ray_unit,
         world.sensor_buf,
         np.int32(cfg.n_rays),
@@ -250,6 +256,156 @@ def phase_eat(world: World) -> None:
     )
 
 
+@njit(cache=True)
+def _bite(
+    pos: np.ndarray,
+    energy: np.ndarray,
+    alive: np.ndarray,
+    genome: np.ndarray,
+    actions: np.ndarray,
+    offsets: np.ndarray,
+    slots: np.ndarray,
+    free_list: np.ndarray,
+    free_count: np.int32,
+    inv_cell_w: np.float32,
+    inv_cell_h: np.float32,
+    gw: np.int32,
+    gh: np.int32,
+    width: np.float32,
+    height: np.float32,
+    reach_x: np.int32,
+    reach_y: np.int32,
+    bite_rate: np.float32,
+    bite_efficiency: np.float32,
+    contact_range: np.float32,
+    traits_off: np.int32,
+) -> tuple[int, int]:
+    """Serial contact predation: gate * diet budget drains neighbours.
+
+    For every living attacker whose ``bite_rate * gate * diet`` budget is
+    positive, scan the CSR cells within ``reach`` of the attacker cell and
+    drain each victim inside contact range ``contact_range * (size_a + size_v)``
+    (shortest toroidal delta). The victim loses ``take`` and the attacker
+    keeps ``bite_efficiency * take`` (the rest dissipates as heat, so energy
+    is never created). A victim left at zero energy dies here: its slot is
+    pushed onto the free-list and counted as a predation death.
+
+    Slot order is fixed and no random numbers are drawn, so the outcome is
+    deterministic. Returns ``(free_count, deaths_predation)``.
+    """
+    n_pred = 0
+    hw = width * np.float32(0.5)
+    hh = height * np.float32(0.5)
+    for i in range(alive.size):
+        if not alive[i]:
+            continue
+        budget = bite_rate * actions[i, 2] * genome[i, traits_off + 3]
+        if budget <= 0.0:
+            continue
+        px = pos[i, 0]
+        py = pos[i, 1]
+        ix0 = int(px * inv_cell_w)
+        iy0 = int(py * inv_cell_h)
+        if ix0 < 0:
+            ix0 = 0
+        elif ix0 >= gw:
+            ix0 = gw - 1
+        if iy0 < 0:
+            iy0 = 0
+        elif iy0 >= gh:
+            iy0 = gh - 1
+        size_i = genome[i, traits_off + 1]
+
+        for dy in range(-reach_y, reach_y + 1):
+            iy = iy0 + dy
+            while iy < 0:
+                iy = iy + gh
+            while iy >= gh:
+                iy = iy - gh
+            for dx in range(-reach_x, reach_x + 1):
+                ix = ix0 + dx
+                while ix < 0:
+                    ix = ix + gw
+                while ix >= gw:
+                    ix = ix - gw
+                k = iy * gw + ix
+                for p in range(offsets[k], offsets[k + 1]):
+                    j = slots[p]
+                    if j == i or not alive[j] or energy[j] <= 0.0:
+                        continue
+                    reach = contact_range * (size_i + genome[j, traits_off + 1])
+                    ddx = px - pos[j, 0]
+                    if ddx > hw:
+                        ddx = ddx - width
+                    elif ddx < -hw:
+                        ddx = ddx + width
+                    ddy = py - pos[j, 1]
+                    if ddy > hh:
+                        ddy = ddy - height
+                    elif ddy < -hh:
+                        ddy = ddy + height
+                    if ddx * ddx + ddy * ddy > reach * reach:
+                        continue
+                    take = energy[j] if energy[j] < budget else budget
+                    if take <= 0.0:
+                        continue
+                    energy[j] = energy[j] - take
+                    energy[i] = energy[i] + bite_efficiency * take
+                    budget = budget - take
+                    if energy[j] <= 0.0:
+                        # killed by this bite: attribute the death now, before
+                        # the famine pass could see the slot
+                        alive[j] = False
+                        energy[j] = 0.0
+                        free_list[free_count] = j
+                        free_count = free_count + 1
+                        n_pred = n_pred + 1
+                    if budget <= 0.0:
+                        break
+                if budget <= 0.0:
+                    break
+            if budget <= 0.0:
+                break
+    return free_count, n_pred
+
+
+def phase_bite(world: World) -> None:
+    cfg = world.config
+    gh, gw = world.cell_counts.shape
+    # Cells to scan per axis so the largest possible contact
+    # (contact_range * 2 * max_size) can never be missed across cell edges.
+    r_max = cfg.contact_range * 2.0 * cfg.max_size
+    reach_x = int(r_max // float(world.cell_w)) + 1
+    reach_y = int(r_max // float(world.cell_h)) + 1
+    reach_x = min(reach_x, gw // 2)
+    reach_y = min(reach_y, gh // 2)
+    free_count, n_pred = _bite(
+        world.pos,
+        world.energy,
+        world.alive,
+        world.genome,
+        world.actions,
+        world.cell_offsets,
+        world.cell_slots,
+        world.free_list,
+        np.int32(world.free_count),
+        np.float32(1.0 / world.cell_w),
+        np.float32(1.0 / world.cell_h),
+        np.int32(gw),
+        np.int32(gh),
+        np.float32(cfg.width),
+        np.float32(cfg.height),
+        np.int32(reach_x),
+        np.int32(reach_y),
+        np.float32(cfg.bite_rate),
+        np.float32(cfg.bite_efficiency),
+        np.float32(cfg.contact_range),
+        np.int32(cfg.brain_params),
+    )
+    world.free_count = int(free_count)
+    world.deaths_predation += int(n_pred)
+
+
 def phase_integrate(world: World) -> None:
     cfg = world.config
     _integrate(
@@ -293,6 +449,7 @@ def phase_reproduce(world: World) -> None:
         np.float32(cfg.trait_mutation_std),
         np.int32(cfg.brain_params),
         np.float32(max(cfg.width, cfg.height)),
+        np.float32(cfg.max_size),
     )
     world.free_count = int(free_count)
     world.births += int(births)
@@ -307,6 +464,7 @@ PHASES = (
     ("think", phase_think),
     ("apply_actions", phase_apply_actions),
     ("eat", phase_eat),
+    ("bite", phase_bite),
     ("integrate", phase_integrate),
     ("deaths", phase_deaths),
     ("reproduce", phase_reproduce),

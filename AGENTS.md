@@ -14,18 +14,25 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   README principal em **inglês**.
 
 ## Estado atual do repositório (verificado em 2026-10-07)
-- **Etapa 4 de 8 concluída**:
-  pacote `primordia/render/` — `settings.py` (Settings: geometria/paleta),
-  `camera.py` (zoom/pan/pan toroidal com cache de índices), `draw.py`
-  (comida via LUT+gather, criaturas em scatter por bucket de raio, overlay
-  de raios/anel/cheiro), `panel.py` (sensores, heatmaps W1|b1/W2|b2, traços,
-  HUD), `app.py` (`run_app`, laço com pausa/velocidades/follow/seleção);
-  `run.py` ganhou modo janela + `--screenshot` + `--select`. Testes novos em
-  `tests/test_render_guard.py` (24 no total): núcleo nunca importa pygame
-  (subprocesso) e janela idêntica ao headless (dummy driver).
-- Predação e dieta ativa são etapa 5; stats.py completo e gráficos, etapa 6;
+- **Etapa 5 de 8 concluída**: predação como traço de dieta evoluível —
+  fase serial `bite` (orçamento `bite_rate × gate × diet`, transferência a
+  `bite_efficiency` com calor, morte da vítima com contagem
+  `deaths_predation`), grade CSR de células (`cell_offsets/cell_slots`,
+  counting sort em `rebuild_counts`), +1 sensor de cheiro de carne
+  (`cell_diet`; layout **19 inputs / brain_params 279 / genome 283**,
+  antes 18/267/271), clamp `size ≤ max_size` na mutação. `Config` ganhou
+  `bite_rate=4.0`, `bite_efficiency=0.7`, `contact_range=1.5`,
+  `max_size=4.0`. Testes novos em `tests/test_predation.py` (32 no total).
+- **Balanceamento (medição, sem hack):** 5000 ticks nos defaults, seeds 42
+  e 7: população no cap (2000), `deaths_predation = 0` — só 27/2000
+  criaturas com `diet > 0` (máx 0.13) e energia média ~7700 (comida fácil
+  demais ⇒ quase nenhum contato mordível). Mecanismo correto (testes de
+  contato/morte/determinismo provam); a pressão evolutiva nos defaults é
+  fraca. Ajuste de `Config` é decisão do usuário (provável candidato:
+  `trait_mutation_std` maior e/ou menos comida — etapa 6/8).
+- Predação/dieta ativa prontas; stats.py completo e gráficos, etapa 6;
   `io.py` e `--load` (etapa 7); README/GIFs, etapa 8.
-- `pytest -q` (24 passed), `python -m primordia.bench [--profile]`,
+- `pytest -q` (32 passed), `python -m primordia.bench [--profile]`,
   `run.py --headless --ticks N` e `run.py --seed 42` (janela) funcionam.
   `run.py --load` só passa a funcionar na etapa 7.
 - **Planos das etapas** ficam em `.opencode/plans/*.md` (não versionados).
@@ -126,6 +133,14 @@ run.py           # CLI: --seed --headless --ticks --load --config
   o limitante é a carga do sistema, não o draw (por frame: draw_food ~5 ms,
   panel ~2 ms, stamp <1 ms). Cuidado ao ler buckets: acumulam **segundos**;
   `s/frame` sem ×1000 mostra 0.04 quando o real é **40 ms**.
+- **Etapa 5 (bite/CSR, 2026-10-07):** A/B alternado com clone do `d745520`
+  em `/tmp` (bench oscilou 137–324 ticks/s nos dois lados sob load 6–10 —
+  ruído domina o bench; confie no profile por fase). Custo novo medido em
+  processo quente: `rebuild_counts` ~91–105 µs (era ~22 µs; prefix com
+  `reshape(-1)` derrubou de 230 para 91; restante = zeração CSR + passes),
+  `bite` ~21–29 µs (no-op barato com diet 0). Bench nesta sessão (load
+  6–8): **1161/382/186 ticks/s** a 500/2000/5000 (piso 30 cumprido com 6x;
+  variação entre execuções até 2–3x conforme carga).
 - O Numba usa todas as 8 threads lógicas: rode benchmark e simulação em
   **sequência**. Dois processos Numba paralelos se pisoteiam e o ticks/s cai
   ~20x (medido em 2026-10-06: 19 ticks/s em paralelo vs ~8000 em sequência).

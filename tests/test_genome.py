@@ -115,7 +115,7 @@ def test_trait_clamps_stay_valid() -> None:
     vision = w.genome[alive, t + 2]
     diet = w.genome[alive, t + 3]
     assert np.all(speed > 0.0) and np.all(speed <= max_dim)
-    assert np.all(size > 0.0)
+    assert np.all(size > 0.0) and np.all(size <= cfg.max_size)
     assert np.all(vision > 0.0) and np.all(vision <= max_dim)
     assert np.all(diet >= 0.0) and np.all(diet <= 1.0)
     assert np.any(diet > 0.0)  # additive mutation lets diet leave 0

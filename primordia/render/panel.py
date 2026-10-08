@@ -269,7 +269,7 @@ def render_panel(
         f"tick {world.tick}   alive {alive}/{world.config.max_creatures}",
         f"mean energy {mean_e:.1f}",
         f"births {world.births}   famine {world.deaths_famine}",
-        f"age deaths {world.deaths_age}",
+        f"age deaths {world.deaths_age}   predation {world.deaths_predation}",
         f"fps {hud.fps:.0f}   sim x{hud.speed}{'  [PAUSED]' if hud.paused else ''}"
         f"{'  [FOLLOW]' if hud.follow else ''}",
         f"seed {hud.seed}",

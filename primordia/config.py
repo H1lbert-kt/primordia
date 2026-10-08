@@ -64,6 +64,12 @@ class Config:
     # --- movement cost ---
     move_cost: float = 0.05  # energy per tick at speed 1 (quadratic in |vel|)
 
+    # --- predation (stage 5): capability comes from the diet trait ---
+    bite_rate: float = 4.0  # max energy an attacker drains per tick (budget)
+    bite_efficiency: float = 0.7  # share of drained energy kept (rest dissipates)
+    contact_range: float = 1.5  # contact = this * (size_a + size_v), world units
+    max_size: float = 4.0  # clamp on the size trait (spawn starts at 1.0)
+
     def __post_init__(self) -> None:
         if self.width <= 0.0 or self.height <= 0.0:
             raise ValueError("world dimensions must be positive")
@@ -101,6 +107,14 @@ class Config:
             raise ValueError("mutation_std and trait_mutation_std must be >= 0")
         if self.move_cost < 0.0:
             raise ValueError("move_cost must be >= 0")
+        if self.bite_rate < 0.0:
+            raise ValueError("bite_rate must be >= 0")
+        if not 0.0 <= self.bite_efficiency <= 1.0:
+            raise ValueError("bite_efficiency must be in [0, 1]")
+        if self.contact_range <= 0.0:
+            raise ValueError("contact_range must be positive")
+        if self.max_size < 1.0:
+            raise ValueError("max_size must be >= 1.0 (spawn initializes size=1.0)")
 
     @property
     def grid_shape(self) -> tuple[int, int]:
@@ -113,7 +127,7 @@ class Config:
     @property
     def sensor_input_dim(self) -> int:
         """Per-creature input vector: ray food + ray creatures + smell + internal."""
-        return self.n_rays * 2 + 2 + 2
+        return self.n_rays * 2 + 3 + 2
 
     @property
     def brain_params(self) -> int:

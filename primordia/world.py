@@ -8,9 +8,15 @@ never resized. Array dtypes are part of the module contract:
     energy (N,) float32, age (N,) int32, genome (N,G) float32,
     species_id (N,) int32, parent_id (N,) int32, alive (N,) bool,
     free_list (N,) int32, food (H,W) float32, cell_counts (H,W) int32,
+    cell_diet (H,W) float32, cell_offsets (H*W+1,) int32,
+    cell_slots (N,) int32, cell_cursor (H*W,) int32 scratch,
     ray_unit (n_rays,2) float32,
     sensor_buf (N, input_dim) float32, hidden_buf (N, hidden) float32,
     actions (N, 3) float32   # scratch buffers, zeroed once, reused every tick
+
+``cell_offsets``/``cell_slots`` are a CSR listing of living slots per cell
+(counting sort rebuilt every tick; stage-5 ``bite`` scans neighbours through
+it). ``cell_cursor`` is its pre-allocated write-head scratch.
 
 Genome layout (see brain.py): brain parameters then body traits; body traits
 are filled from Config at spawn and vary only through mutation (stage 3).
@@ -26,16 +32,28 @@ from .genome import seed_numba_rng
 
 
 @njit(cache=True)
-def _count_alive(
+def _rebuild_grid(
     pos: np.ndarray,
     alive: np.ndarray,
+    genome: np.ndarray,
+    traits_off: np.int32,
     counts: np.ndarray,
+    diet_sum: np.ndarray,
+    offsets: np.ndarray,
+    slots: np.ndarray,
+    cursor: np.ndarray,
     inv_cell_w: np.float32,
     inv_cell_h: np.float32,
     gw: np.int32,
     gh: np.int32,
 ) -> None:
-    """One serial pass: counts[cy, cx] += 1 for every living creature."""
+    """Serial counting sort: per-cell counts, diet sums and CSR slot lists.
+
+    Slots are visited in ascending order in both passes, so the float32 diet
+    sums and the CSR layout are deterministic bit for bit. ``counts`` and
+    ``diet_sum`` must be zeroed by the caller; ``offsets`` is fully rewritten.
+    """
+    # Pass A: counts and diet sums per cell.
     for i in range(alive.size):
         if alive[i]:
             ix = int(pos[i, 0] * inv_cell_w)
@@ -49,6 +67,34 @@ def _count_alive(
             elif iy >= gh:
                 iy = gh - 1
             counts[iy, ix] = counts[iy, ix] + 1
+            diet_sum[iy, ix] = diet_sum[iy, ix] + genome[i, traits_off + 3]
+
+    # Prefix sums over cells in row-major order. The reshape keeps a flat
+    # view (counts is C-contiguous), avoiding a divide+modulo per cell.
+    flat = counts.reshape(-1)
+    offsets[0] = 0
+    for k in range(gh * gw):
+        offsets[k + 1] = offsets[k] + flat[k]
+
+    # Pass B: scatter living slots into their cell ranges.
+    for k in range(gh * gw):
+        cursor[k] = offsets[k]
+    for i in range(alive.size):
+        if alive[i]:
+            ix = int(pos[i, 0] * inv_cell_w)
+            iy = int(pos[i, 1] * inv_cell_h)
+            if ix < 0:
+                ix = 0
+            elif ix >= gw:
+                ix = gw - 1
+            if iy < 0:
+                iy = 0
+            elif iy >= gh:
+                iy = gh - 1
+            k = iy * gw + ix
+            p = cursor[k]
+            slots[p] = i
+            cursor[k] = p + 1
 
 
 class World:
@@ -84,6 +130,11 @@ class World:
         self.cell_h = np.float32(config.height / gh)
         self.food = np.full((gh, gw), config.initial_food, dtype=np.float32)
         self.cell_counts = np.zeros((gh, gw), dtype=np.int32)
+        self.cell_diet = np.zeros((gh, gw), dtype=np.float32)
+        n_cells = gh * gw
+        self.cell_offsets = np.zeros(n_cells + 1, dtype=np.int32)
+        self.cell_slots = np.zeros(n, dtype=np.int32)
+        self.cell_cursor = np.zeros(n_cells, dtype=np.int32)
 
         # Ray fan as unit vectors of the fovea-relative offsets; each creature
         # rotates this table by its angle (one sin/cos per creature, not per ray).
@@ -103,6 +154,7 @@ class World:
         self.births = 0
         self.deaths_famine = 0
         self.deaths_age = 0
+        self.deaths_predation = 0
         self.spawn(config.initial_creatures)
 
     @property
@@ -110,13 +162,20 @@ class World:
         return int(np.count_nonzero(self.alive))
 
     def rebuild_counts(self) -> None:
-        """Rebuild the creature-per-cell grid that the ray sensors read."""
+        """Rebuild the per-cell grids: creature counts, diet sums, CSR lists."""
         self.cell_counts.fill(0)
+        self.cell_diet.fill(0.0)
         gh, gw = self.cell_counts.shape
-        _count_alive(
+        _rebuild_grid(
             self.pos,
             self.alive,
+            self.genome,
+            np.int32(self.config.brain_params),
             self.cell_counts,
+            self.cell_diet,
+            self.cell_offsets,
+            self.cell_slots,
+            self.cell_cursor,
             np.float32(1.0 / self.cell_w),
             np.float32(1.0 / self.cell_h),
             np.int32(gw),
