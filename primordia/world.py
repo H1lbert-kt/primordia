@@ -6,13 +6,22 @@ never resized. Array dtypes are part of the module contract:
 
     pos (N,2) float32, vel (N,2) float32, angle (N,) float32,
     energy (N,) float32, age (N,) int32, genome (N,G) float32,
-    species_id (N,) int32, parent_id (N,) int32, alive (N,) bool,
-    free_list (N,) int32, food (H,W) float32, cell_counts (H,W) int32,
+    species_id (N,) int32, parent_id (N,) int32, creature_id (N,) int32,
+    alive (N,) bool, free_list (N,) int32, food (H,W) float32,
+    cell_counts (H,W) int32,
     cell_diet (H,W) float32, cell_offsets (H*W+1,) int32,
     cell_slots (N,) int32, cell_cursor (H*W,) int32 scratch,
+    genealogy (L,3) int32,   # birth log rows (tick, child_id, parent_id)
     ray_unit (n_rays,2) float32,
     sensor_buf (N, input_dim) float32, hidden_buf (N, hidden) float32,
     actions (N, 3) float32   # scratch buffers, zeroed once, reused every tick
+
+``creature_id`` is a monotonic birth id (``next_id`` counts up); dead slots
+keep their stale id, so every lookup must also filter ``alive``.
+``parent_id`` stores the parent's **creature id** (not its slot: slots are
+recycled and would corrupt the lineage), ``-1`` for spawn. ``genealogy`` is
+the append-only birth log (capacity ``Config.genealogy_capacity``); when it
+fills, further births only bump ``genealogy_overflow``.
 
 ``cell_offsets``/``cell_slots`` are a CSR listing of living slots per cell
 (counting sort rebuilt every tick; stage-5 ``bite`` scans neighbours through
@@ -102,6 +111,7 @@ class World:
 
     def __init__(self, config: Config, seed: int = 0) -> None:
         self.config = config
+        self.seed = seed
         self.rng = np.random.default_rng(seed)
         seed_numba_rng(seed)  # second stream, used only by genome._reproduce
         n = config.max_creatures
@@ -114,6 +124,7 @@ class World:
         self.genome = np.zeros((n, config.genome_size), dtype=np.float32)
         self.species_id = np.zeros(n, dtype=np.int32)
         self.parent_id = np.full(n, -1, dtype=np.int32)
+        self.creature_id = np.full(n, -1, dtype=np.int32)
         self.alive = np.zeros(n, dtype=bool)
 
         # Free-list stack: pop from the end (free_count-1), push at free_count.
@@ -155,6 +166,13 @@ class World:
         self.deaths_famine = 0
         self.deaths_age = 0
         self.deaths_predation = 0
+
+        # Genealogy (stage 7): birth-id allocator plus the pre-allocated
+        # birth log; _reproduce writes rows through the cursor in-place.
+        self.next_id = 0
+        self.genealogy = np.zeros((config.genealogy_capacity, 3), dtype=np.int32)
+        self.genealogy_used = 0
+        self.genealogy_overflow = 0
         self.spawn(config.initial_creatures)
 
     @property
@@ -216,5 +234,9 @@ class World:
 
         self.species_id[slots] = 0
         self.parent_id[slots] = -1
+        self.creature_id[slots] = np.arange(
+            self.next_id, self.next_id + count, dtype=np.int32
+        )
+        self.next_id += count
         self.alive[slots] = True
         return slots

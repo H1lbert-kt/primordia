@@ -21,13 +21,14 @@ stream seeded once at ``World`` construction (``seed_numba_rng``). Because the
 stream is process-global, tests that compare two worlds with active
 reproduction must advance them sequentially, never interleaved. Draws happen
 in a fixed order (ascending slots; brain genes before traits) and only inside
-this serial kernel — never inside ``prange``.
+this serial kernel — never inside ``prange``. The stream can be snapshotted
+and restored for save/load (``get_numba_rng_state``/``set_numba_rng_state``).
 """
 
 from __future__ import annotations
 
 import numpy as np
-from numba import njit
+from numba import _helperlib, njit
 
 # Numerical floor keeping positive traits strictly positive; not a balance
 # parameter (mutation magnitudes never approach it with valid Config values).
@@ -38,6 +39,26 @@ TRAIT_EPS = 1e-4
 def seed_numba_rng(seed: int) -> None:
     """Seed the Numba RNG stream (separate from ``World.rng``)."""
     np.random.seed(seed & 0xFFFFFFFF)
+
+
+def get_numba_rng_state() -> tuple[int, list[int]]:
+    """Snapshot the process-global Numba RNG stream (for save/load).
+
+    Uses ``numba._helperlib`` — a private API, but the only one exposing the
+    stream; it is the same call the numba test suite uses. Verified against
+    numba 0.68 (the pinned version in AGENTS.md); tests/test_io.py fails
+    loudly if a future numba removes it.
+    """
+    index, key = _helperlib.rnd_get_state(_helperlib.rnd_get_np_state_ptr())
+    return int(index), [int(v) for v in key]
+
+
+def set_numba_rng_state(state: tuple[int, list[int]]) -> None:
+    """Restore a stream captured by :func:`get_numba_rng_state`, bit-exact."""
+    index, key = state
+    _helperlib.rnd_set_state(
+        _helperlib.rnd_get_np_state_ptr(), (int(index), [int(v) for v in key])
+    )
 
 
 @njit(cache=True)
@@ -51,6 +72,8 @@ def _reproduce(
     genome: np.ndarray,
     species_id: np.ndarray,
     parent_id: np.ndarray,
+    creature_id: np.ndarray,
+    genealogy: np.ndarray,
     free_list: np.ndarray,
     free_count: np.int32,
     threshold: np.float32,
@@ -61,15 +84,26 @@ def _reproduce(
     traits_off: np.int32,
     max_dim: np.float32,
     max_size: np.float32,
-) -> tuple[int, int]:
+    tick: np.int32,
+    next_id: np.int32,
+    genealogy_used: np.int32,
+    genealogy_overflow: np.int32,
+) -> tuple[int, int, int, int, int]:
     """One serial pass: split every eligible parent that has a free slot.
 
-    Returns ``(births, free_count)``. Slots are popped LIFO, matching the
-    free-list convention of ``World.spawn``. The scan stops early when the
-    population reaches capacity.
+    Returns ``(births, free_count, genealogy_used, genealogy_overflow,
+    next_id)``. Slots are popped LIFO, matching the free-list convention of
+    ``World.spawn``. The scan stops early when the population reaches
+    capacity. Each child gets a monotonic ``creature_id`` and a
+    ``parent_id`` holding the parent's creature id (never its slot: slots
+    are recycled and would corrupt the lineage); the birth is appended to
+    the ``genealogy`` log until it is full (then only ``overflow`` grows).
+    No random draws happen here beyond the mutation draws above, so the
+    RNG call order is unchanged by the bookkeeping.
     """
     births = 0
     n_genes = genome.shape[1]
+    log_cap = genealogy.shape[0]
     for i in range(alive.size):
         if not alive[i] or energy[i] < threshold:
             continue
@@ -135,8 +169,18 @@ def _reproduce(
         angle[child] = angle[i]
         age[child] = 0
         species_id[child] = species_id[i]
-        parent_id[child] = i
+        child_id = next_id
+        next_id = next_id + 1
+        creature_id[child] = child_id
+        parent_id[child] = creature_id[i]
+        if genealogy_used < log_cap:
+            genealogy[genealogy_used, 0] = tick
+            genealogy[genealogy_used, 1] = child_id
+            genealogy[genealogy_used, 2] = creature_id[i]
+            genealogy_used = genealogy_used + 1
+        else:
+            genealogy_overflow = genealogy_overflow + 1
         alive[child] = True
         births = births + 1
 
-    return births, free_count
+    return births, free_count, genealogy_used, genealogy_overflow, next_id

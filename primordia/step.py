@@ -430,7 +430,7 @@ def phase_deaths(world: World) -> None:
 
 def phase_reproduce(world: World) -> None:
     cfg = world.config
-    births, free_count = _reproduce(
+    births, free_count, log_used, log_overflow, next_id = _reproduce(
         world.pos,
         world.vel,
         world.age,
@@ -440,6 +440,8 @@ def phase_reproduce(world: World) -> None:
         world.genome,
         world.species_id,
         world.parent_id,
+        world.creature_id,
+        world.genealogy,
         world.free_list,
         np.int32(world.free_count),
         np.float32(cfg.reproduce_threshold),
@@ -450,9 +452,16 @@ def phase_reproduce(world: World) -> None:
         np.int32(cfg.brain_params),
         np.float32(max(cfg.width, cfg.height)),
         np.float32(cfg.max_size),
+        np.int32(world.tick),
+        np.int32(world.next_id),
+        np.int32(world.genealogy_used),
+        np.int32(world.genealogy_overflow),
     )
     world.free_count = int(free_count)
     world.births += int(births)
+    world.genealogy_used = int(log_used)
+    world.genealogy_overflow = int(log_overflow)
+    world.next_id = int(next_id)
 
 
 # Tick phases in execution order; consumed by `python -m primordia.bench --profile`.

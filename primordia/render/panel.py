@@ -248,12 +248,11 @@ def render_panel(
             y,
             settings.text,
         )
+        cid = int(world.creature_id[slot])
         parent = int(world.parent_id[slot])
+        y = _text(dst, 16, f"id #{cid}   parent #{parent}", x, y, settings.text_dim)
         y = _text(
-            dst, 16, f"parent #{parent}   species {int(world.species_id[slot])}",
-            x,
-            y,
-            settings.text_dim,
+            dst, 16, f"species {int(world.species_id[slot])}", x, y, settings.text_dim
         )
         y += 8
     else:

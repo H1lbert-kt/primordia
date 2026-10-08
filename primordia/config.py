@@ -61,6 +61,9 @@ class Config:
     mutation_std: float = 0.05  # additive std for brain genes
     trait_mutation_std: float = 0.10  # relative std for multiplicative traits
 
+    # --- genealogy (stage 7): pre-allocated birth log buffer ---
+    genealogy_capacity: int = 100_000  # rows of (tick, child_id, parent_id); 0 = off
+
     # --- movement cost ---
     move_cost: float = 0.05  # energy per tick at speed 1 (quadratic in |vel|)
 
@@ -115,6 +118,8 @@ class Config:
             raise ValueError("contact_range must be positive")
         if self.max_size < 1.0:
             raise ValueError("max_size must be >= 1.0 (spawn initializes size=1.0)")
+        if self.genealogy_capacity < 0:
+            raise ValueError("genealogy_capacity must be >= 0")
 
     @property
     def grid_shape(self) -> tuple[int, int]:

@@ -13,42 +13,52 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
 - Código, identificadores, comentários, docstrings, mensagens de commit e
   README principal em **inglês**.
 
-## Estado atual do repositório (verificado em 2026-10-07)
-- **Etapa 6 de 8 concluída**: estatísticas e gráficos — `primordia/stats.py`
-  (`StatsRecorder.record(world)` por tick **fora** do `advance`, só leitura,
-  colunas int32/float32: população, energia/idade médias, deltas de
-  nascimentos/mortes por causa, mean/std dos 4 traços, `genome_dist`
-  amostrado a cada 10 ticks com forward-fill; `save/load` npz com seed e
-  Config), `run.py --stats PATH` (headless), `plot.py` na raiz (4 PNGs:
-  population/energy/deaths/diversity; Agg). Testes novos em
-  `tests/test_stats.py` (**40 no total**; guard agora importa
-  `primordia.stats` e segue garantindo núcleo sem matplotlib).
-- **Desempenho do stats (medido, honesto):** custo direto de `record`
-  ~0.5 ms/tick a N=2000 (relógio estável); em runs longos, `--stats` custa
-  **~40% de ticks/s** (166–199 vs 251–376 sem stats, pares alternados) —
-  resíduo ~1–1.5 ms de origem não isolada (qualquer atividade numpy extra
-  no loop perturba os avanços seguintes; o noise da máquina — load 3–10 —
-  está acima do efeito para bisect fino; `sample_every` 10→50 não mudou o
-  resultado). **Bug real corrigido:** `x @ x.T` no `genome_dist` disparava a
-  barreira de 8 threads do OpenBLAS por micro-gemm, cujas threads em
-  spin-wait roubavam CPU dos `prange` seguintes → 35 ticks/s com stats;
-  trocado por `np.einsum` sem `optimize` (não-BLAS) → ~190. **Não voltar
-  para `@`** sem re-medir o loop completo. Bench/núcleo intactos.
-- **Balanceamento (5000 ticks, seeds 42/7, mesmas conclusões da etapa 5):**
-  pop no cap 2000; energia média 52 → **7669/8397** e ainda subindo (sem
-  teto); `deaths_predation = 0`, `diet_mean ≤ 0.0007`; cliff de idade: o
-  spawn inicial morre em bloco no tick 5000 (391 mortes + 391 reposições no
-  mesmo tick — free-list LIFO, coerente); `vision_std ≈ 0.9` domina a
-  diversidade (speed/size/diet ~0.01), `genome_dist` estável ~0.36.
+## Estado atual do repositório (verificado em 2026-10-08)
+- **Etapa 7 de 8 concluída**: salvar/carregar + árvore genealógica —
+  `primordia/io.py` (`save_world`/`load_world`, npz **formato v1** com
+  `format_version`; versão desconhecida → `ValueError`; salva só o estado
+  de verdade — scratch/cells ficam de fora, `rebuild_counts` roda no load),
+  `run.py --save PATH` (headless e janela) e `--load PATH` (ignora
+  `--seed/--pop`, imprime tick/alive/births do arquivo). Genealogia:
+  `creature_id (N,) int32` monotônico (`next_id`), **`parent_id` guarda o
+  id do pai, não o slot** (slot é reciclado e corromperia a linhagem;
+  `-1` = fundador), log de nascimentos `genealogy (L,3) int32` =
+  `(tick, child_id, parent_id)` com `Config.genealogy_capacity=100_000` e
+  contador `genealogy_overflow` (não cresce arrays); painel exibe
+  `id/parent`. RNG: `genome.get/set_numba_rng_state` via
+  `numba._helperlib.rnd_get_np_state_ptr` (API **privada**, verificada em
+  numba 0.68, é a da suite do numba; guard em `tests/test_io.py`).
+  Testes novos em `tests/test_io.py` (**48 no total**; guard importa
+  `primordia.io`).
+- **Continuação idêntica provada na CLI:** 2500 ticks contínuos ==
+  2000 + `--save` + `--load` + 500 — arrays, contadores e log bit-a-bit
+  (seed 42, N=2000); em-processo no teste `test_continuation_identical`
+  (sequencial + restore explícito do stream salvo entre as pernas).
+- **Desempenho da etapa 7:** profile A/B alternado (clone do `a148ecb` em
+  `/tmp`): `reproduce` 16 → **23 µs/tick** (+7 µs ≈ 0.4% do tick a N=2000;
+  custo = atribuição de id + linha de log, **zero draws de RNG novos**).
+  Bench sob load 9–12 (máquina saturada): 263–279/108–172/61–70 a
+  500/2000/5000; A/B alternado oscila na mesma faixa nos dois lados —
+  ruído domina, sem regressão atribuível. Piso 30 @N=2000 cumprido com
+  3–6x. Re-medir o bench quando a máquina estiver com load <3.
+- **Stats (etapa 6, ainda válido):** custo de `record` ~0.5 ms/tick;
+  **nunca voltar `@` no `genome_dist`** (bug OpenBLAS: 35 ticks/s, usar
+  `np.einsum` sem `optimize`); runs longos com `--stats` custam ~40% de
+  ticks/s (medição antiga, load 3–10).
+- **Balanceamento (5000 ticks, seeds 42/7, mesmas conclusões das etapas
+  5/6):** pop no cap 2000; energia média 52 → **7669/8397** e ainda
+  subindo (sem teto); `deaths_predation = 0`, `diet_mean ≤ 0.0007`; cliff
+  de idade do spawn inicial no tick 5000 (free-list LIFO, coerente);
+  `vision_std ≈ 0.9` domina a diversidade, `genome_dist` estável ~0.36.
   Candidatos de ajuste (decisão do usuário, sem hacks): menos comida
   (`food_growth_rate`/`eat_rate`), custo metabólico maior, ou
   `trait_mutation_std` maior.
-- Predação/dieta ativas prontas; `io.py` e `--load` (etapa 7);
-  experimentos/README/GIFs (etapa 8).
-- `pytest -q` (40 passed), `python -m primordia.bench [--profile]`,
-  `run.py --headless --ticks N [--stats out.npz]`,
+- Predação/dieta ativas prontas; experimentos/README/GIFs (etapa 8).
+- `pytest -q` (48 passed), `python -m primordia.bench [--profile]`,
+  `run.py --headless --ticks N [--stats out.npz] [--save w.npz]`,
+  `run.py --load w.npz --headless --ticks N`,
   `python plot.py out.npz --out figs/` e `run.py --seed 42` (janela)
-  funcionam. `run.py --load` só passa a funcionar na etapa 7.
+  funcionam. `--config` e o plot da árvore genealógica ficam na etapa 8.
 - **Planos das etapas** ficam em `.opencode/plans/*.md` (não versionados).
 - Ambiente em `.venv` (Python **3.14.7**): numpy 2.5.3, numba 0.68.0,
   pygame-ce 2.5.8, matplotlib 3.11.2, pytest 9.1.1. Verificado: `@njit` +
@@ -95,15 +105,16 @@ primordia/
   render/        # pygame: câmera, zoom, painel do cérebro (nunca importado pelo núcleo)
 tests/
 experiments/     # um script + um README curto por experimento
-run.py           # CLI: --seed --headless --ticks --load --config
-                 #      --screenshot --select (janela)
+run.py           # CLI: --seed --headless --ticks --load --save --stats
+                 #      --config --screenshot --select (janela)
 ```
 
 ## Modelo de dados
 - Capacidade fixa pré-alocada (`max_creatures`), com máscara `alive` (bool).
   Mortos são reciclados via free-list; **nunca** `append`/`delete` em arrays no loop.
 - Campos mínimos por criatura: `pos (N,2)`, `vel (N,2)`, `angle`, `energy`,
-  `age`, `genome (N,G)`, `species_id`, `parent_id`, `alive`.
+  `age`, `genome (N,G)`, `species_id`, `parent_id` (id do pai), `creature_id`,
+  `alive`.
 - Use `float32` para estado e pesos, `int32` para ids/contadores. Documente
   o dtype de cada array em `world.py`.
 - Cérebro: MLP pequena (entrada ~ raios + sensores internos, 1 camada oculta
@@ -161,6 +172,12 @@ run.py           # CLI: --seed --headless --ticks --load --config
   energia/idade ~30 µs, dist amostrada amortizada). Efeito OpenBLAS
   (ver Estado atual): nunca comparar `@` vs `einsum` só isolado — medir o
   loop completo. Runs longos com `--stats`: ver "Desempenho do stats".
+- **Etapa 7 (io + genealogia, 2026-10-08):** bench sob **load 9–12**:
+  263–279/108–172/61–70 a 500/2000/5000; A/B alternado contra o clone do
+  `a148ecb` oscila na mesma faixa nos dois lados (ruído domina o bench
+  total; confie no profile por fase). Profile por fase: `reproduce`
+  16 → **23 µs** (id + log, sem draws novos) — único custo da etapa no
+  tick. Piso 30 @N=2000 cumprido com 3–6x. Re-medir com load <3.
 - O Numba usa todas as 8 threads lógicas: rode benchmark e simulação em
   **sequência**. Dois processos Numba paralelos se pisoteiam e o ticks/s cai
   ~20x (medido em 2026-10-06: 19 ticks/s em paralelo vs ~8000 em sequência).
@@ -175,6 +192,10 @@ run.py           # CLI: --seed --headless --ticks --load --config
   intercalados compartilham desenhos e divergem. Com reprodução ativa,
   rode mundos em **sequência** (mundo A completo, depois B) — CLI e bench
   já são sequenciais; testes seguem a mesma regra.
+- Save/load (`primordia.io`) captura e restaura **ambos** os streams
+  (`rng.bit_generator.state` + `get/set_numba_rng_state`), então
+  `load(save(w))` continua bit-a-bit; salvar exige que o mundo seja o
+  stream ativo (mesma regra sequencial de cima).
 - Dentro de `prange`, **não** gere números aleatórios. Pré-gere os arrays de
   ruído fora do bloco paralelo e passe-os como argumento.
 - Nunca itere sobre `set`/`dict` onde a ordem afete o resultado.
@@ -219,7 +240,9 @@ python plot.py s42.npz --out figs/                 # 4 PNGs (matplotlib)
 python run.py --seed 42                            # com visualização
 python run.py --seed 42 --ticks 300 --select 1 \
     --screenshot out.png                           # janela com evidência
-python run.py --load saves/world.npz               # retomar mundo (etapa 7)
+python run.py --seed 42 --headless --ticks 5000 \
+    --save saves/w5k.npz                           # gravar mundo (etapa 7)
+python run.py --load saves/w5k.npz --headless --ticks 500   # retomar
 pytest -q                                          # testes
 python -m primordia.bench                          # benchmark de ticks/s
 ```

@@ -29,6 +29,9 @@ def test_dtypes_and_shapes() -> None:
     assert w.genome.shape == (n, cfg.genome_size) and w.genome.dtype == np.float32
     assert w.species_id.dtype == np.int32
     assert w.parent_id.dtype == np.int32
+    assert w.creature_id.dtype == np.int32
+    assert w.genealogy.shape == (cfg.genealogy_capacity, 3)
+    assert w.genealogy.dtype == np.int32
     assert w.alive.dtype == np.bool_
     assert w.food.dtype == np.float32
     assert w.alive_count == cfg.initial_creatures
@@ -61,7 +64,7 @@ def test_determinism_same_seed() -> None:
     w2 = World(cfg, seed=42)
     for _ in range(500):
         advance(w2)
-    arrays = ("pos", "vel", "angle", "energy", "age", "genome", "species_id", "parent_id", "alive", "food")
+    arrays = ("pos", "vel", "angle", "energy", "age", "genome", "species_id", "parent_id", "creature_id", "alive", "food")
     for name in arrays:
         assert np.array_equal(getattr(w1, name), getattr(w2, name)), name
     assert (w1.births, w1.deaths_famine, w1.deaths_age) == (

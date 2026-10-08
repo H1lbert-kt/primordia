@@ -19,6 +19,7 @@ ARRAYS = (
     "genome",
     "species_id",
     "parent_id",
+    "creature_id",
     "alive",
     "food",
 )
@@ -34,7 +35,7 @@ def birth_of_one_parent(cfg: Config, seed: int = 2) -> tuple[World, int, int]:
     parent = first_alive(w)
     w.energy[parent] = 200.0
     step.phase_reproduce(w)
-    children = np.flatnonzero(w.alive & (w.parent_id == parent))
+    children = np.flatnonzero(w.alive & (w.parent_id == w.creature_id[parent]))
     assert children.size == 1
     return w, parent, int(children[0])
 
@@ -46,7 +47,7 @@ def test_reproduce_splits_energy() -> None:
     w.energy[parent] = 200.0
     step.phase_reproduce(w)
 
-    children = np.flatnonzero(w.alive & (w.parent_id == parent))
+    children = np.flatnonzero(w.alive & (w.parent_id == w.creature_id[parent]))
     assert children.size == 1
     child = int(children[0])
     total = float(w.energy[parent]) + float(w.energy[child])
@@ -69,7 +70,7 @@ def test_child_inherits_state_and_genome() -> None:
 
     assert np.array_equal(w.genome[child], w.genome[parent])
     assert w.age[child] == 0
-    assert w.parent_id[child] == parent
+    assert w.parent_id[child] == w.creature_id[parent]
     np.testing.assert_array_equal(w.pos[child], w.pos[parent])
     np.testing.assert_array_equal(w.vel[child], 0.0)
     assert w.angle[child] == w.angle[parent]
