@@ -14,27 +14,41 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   README principal em **inglês**.
 
 ## Estado atual do repositório (verificado em 2026-10-07)
-- **Etapa 5 de 8 concluída**: predação como traço de dieta evoluível —
-  fase serial `bite` (orçamento `bite_rate × gate × diet`, transferência a
-  `bite_efficiency` com calor, morte da vítima com contagem
-  `deaths_predation`), grade CSR de células (`cell_offsets/cell_slots`,
-  counting sort em `rebuild_counts`), +1 sensor de cheiro de carne
-  (`cell_diet`; layout **19 inputs / brain_params 279 / genome 283**,
-  antes 18/267/271), clamp `size ≤ max_size` na mutação. `Config` ganhou
-  `bite_rate=4.0`, `bite_efficiency=0.7`, `contact_range=1.5`,
-  `max_size=4.0`. Testes novos em `tests/test_predation.py` (32 no total).
-- **Balanceamento (medição, sem hack):** 5000 ticks nos defaults, seeds 42
-  e 7: população no cap (2000), `deaths_predation = 0` — só 27/2000
-  criaturas com `diet > 0` (máx 0.13) e energia média ~7700 (comida fácil
-  demais ⇒ quase nenhum contato mordível). Mecanismo correto (testes de
-  contato/morte/determinismo provam); a pressão evolutiva nos defaults é
-  fraca. Ajuste de `Config` é decisão do usuário (provável candidato:
-  `trait_mutation_std` maior e/ou menos comida — etapa 6/8).
-- Predação/dieta ativa prontas; stats.py completo e gráficos, etapa 6;
-  `io.py` e `--load` (etapa 7); README/GIFs, etapa 8.
-- `pytest -q` (32 passed), `python -m primordia.bench [--profile]`,
-  `run.py --headless --ticks N` e `run.py --seed 42` (janela) funcionam.
-  `run.py --load` só passa a funcionar na etapa 7.
+- **Etapa 6 de 8 concluída**: estatísticas e gráficos — `primordia/stats.py`
+  (`StatsRecorder.record(world)` por tick **fora** do `advance`, só leitura,
+  colunas int32/float32: população, energia/idade médias, deltas de
+  nascimentos/mortes por causa, mean/std dos 4 traços, `genome_dist`
+  amostrado a cada 10 ticks com forward-fill; `save/load` npz com seed e
+  Config), `run.py --stats PATH` (headless), `plot.py` na raiz (4 PNGs:
+  population/energy/deaths/diversity; Agg). Testes novos em
+  `tests/test_stats.py` (**40 no total**; guard agora importa
+  `primordia.stats` e segue garantindo núcleo sem matplotlib).
+- **Desempenho do stats (medido, honesto):** custo direto de `record`
+  ~0.5 ms/tick a N=2000 (relógio estável); em runs longos, `--stats` custa
+  **~40% de ticks/s** (166–199 vs 251–376 sem stats, pares alternados) —
+  resíduo ~1–1.5 ms de origem não isolada (qualquer atividade numpy extra
+  no loop perturba os avanços seguintes; o noise da máquina — load 3–10 —
+  está acima do efeito para bisect fino; `sample_every` 10→50 não mudou o
+  resultado). **Bug real corrigido:** `x @ x.T` no `genome_dist` disparava a
+  barreira de 8 threads do OpenBLAS por micro-gemm, cujas threads em
+  spin-wait roubavam CPU dos `prange` seguintes → 35 ticks/s com stats;
+  trocado por `np.einsum` sem `optimize` (não-BLAS) → ~190. **Não voltar
+  para `@`** sem re-medir o loop completo. Bench/núcleo intactos.
+- **Balanceamento (5000 ticks, seeds 42/7, mesmas conclusões da etapa 5):**
+  pop no cap 2000; energia média 52 → **7669/8397** e ainda subindo (sem
+  teto); `deaths_predation = 0`, `diet_mean ≤ 0.0007`; cliff de idade: o
+  spawn inicial morre em bloco no tick 5000 (391 mortes + 391 reposições no
+  mesmo tick — free-list LIFO, coerente); `vision_std ≈ 0.9` domina a
+  diversidade (speed/size/diet ~0.01), `genome_dist` estável ~0.36.
+  Candidatos de ajuste (decisão do usuário, sem hacks): menos comida
+  (`food_growth_rate`/`eat_rate`), custo metabólico maior, ou
+  `trait_mutation_std` maior.
+- Predação/dieta ativas prontas; `io.py` e `--load` (etapa 7);
+  experimentos/README/GIFs (etapa 8).
+- `pytest -q` (40 passed), `python -m primordia.bench [--profile]`,
+  `run.py --headless --ticks N [--stats out.npz]`,
+  `python plot.py out.npz --out figs/` e `run.py --seed 42` (janela)
+  funcionam. `run.py --load` só passa a funcionar na etapa 7.
 - **Planos das etapas** ficam em `.opencode/plans/*.md` (não versionados).
 - Ambiente em `.venv` (Python **3.14.7**): numpy 2.5.3, numba 0.68.0,
   pygame-ce 2.5.8, matplotlib 3.11.2, pytest 9.1.1. Verificado: `@njit` +
@@ -141,6 +155,12 @@ run.py           # CLI: --seed --headless --ticks --load --config
   `bite` ~21–29 µs (no-op barato com diet 0). Bench nesta sessão (load
   6–8): **1161/382/186 ticks/s** a 500/2000/5000 (piso 30 cumprido com 6x;
   variação entre execuções até 2–3x conforme carga).
+- **Etapa 6 (stats, 2026-10-07):** bench **545/527/114 ticks/s** a
+  500/2000/5000 (load ~3; o stats não mexe no tick). Custos do `record`
+  medidos em loop quente: ~0.46–0.62 ms/tick (traits mean/std ~170 µs,
+  energia/idade ~30 µs, dist amostrada amortizada). Efeito OpenBLAS
+  (ver Estado atual): nunca comparar `@` vs `einsum` só isolado — medir o
+  loop completo. Runs longos com `--stats`: ver "Desempenho do stats".
 - O Numba usa todas as 8 threads lógicas: rode benchmark e simulação em
   **sequência**. Dois processos Numba paralelos se pisoteiam e o ticks/s cai
   ~20x (medido em 2026-10-06: 19 ticks/s em paralelo vs ~8000 em sequência).
@@ -194,6 +214,8 @@ Simulações assim falham por balanceamento, não por bug. Portanto:
 ## Comandos
 ```bash
 python run.py --seed 42 --headless --ticks 10000   # simulação sem janela
+python run.py --seed 42 --headless --ticks 5000 --stats s42.npz
+python plot.py s42.npz --out figs/                 # 4 PNGs (matplotlib)
 python run.py --seed 42                            # com visualização
 python run.py --seed 42 --ticks 300 --select 1 \
     --screenshot out.png                           # janela com evidência

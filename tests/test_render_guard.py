@@ -23,7 +23,8 @@ def test_core_never_imports_pygame() -> None:
     code = (
         "import sys\n"
         "import primordia.config, primordia.world, primordia.step, "
-        "primordia.genome, primordia.brain, primordia.sensors, primordia.bench\n"
+        "primordia.genome, primordia.brain, primordia.sensors, primordia.bench, "
+        "primordia.stats\n"
         "assert 'pygame' not in sys.modules, 'pygame leaked into the core'\n"
         "assert 'matplotlib' not in sys.modules, 'matplotlib leaked into the core'\n"
         "print('core-clean')\n"
