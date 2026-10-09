@@ -3,17 +3,23 @@
 Hot paths avoid Python loops over creatures and avoid slow strided writes:
 the food grid is gathered through a camera-cached flat index and expanded to
 packed ``uint32`` pixels with one ``np.take``, then living creatures are
-scattered into the same packed buffer (one vectorized pass per disc radius).
-``pygame.surfarray.pixels2d`` of an owned surface is contiguous, so every
-large copy here is contiguous. Only the selection overlay (rings, smell
-circle, seven rays) uses ``pygame.draw``, and only for the selected creature.
+scattered into the same packed buffer (one vectorized pass per
+``(radius, heading)`` sprite pose). ``pygame.surfarray.pixels2d`` of an owned
+surface is contiguous, so every large copy here is contiguous. Only the
+selection overlay (rings, smell circle, seven rays), the selected creature's
+trail and the event flashes use ``pygame.draw``.
 
 Body-trait layout (see ``Config``): ``brain_params + 0`` max_speed,
 ``+1`` size, ``+2`` vision, ``+3`` diet — the pixel radius comes from size.
+
+Render-side state trackers (``EventTracker``, ``SparkTracker``) diff
+successive frames into flashes/sparklines; they only *read* the world and
+draw no random numbers, so recording stays bit-identical to headless runs.
 """
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 
 import numpy as np
@@ -25,17 +31,44 @@ from .settings import Settings
 # Per-channel bit shifts of the R, G and B bytes in the surface pixel format.
 PixelFormat = tuple[int, int, int]
 
-# Per-radius disc offsets (ox, oy with ox^2 + oy^2 <= r^2), built on demand.
-_DISC_CACHE: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+# Humanoid sprite masks per (radius, heading bucket, bucket count).
+_SPRITE_CACHE: dict[tuple[int, int, int], tuple[np.ndarray, np.ndarray]] = {}
 
 
-def _disc(radius: int) -> tuple[np.ndarray, np.ndarray]:
-    if radius not in _DISC_CACHE:
-        oy = np.arange(-radius, radius + 1, dtype=np.int32)
-        dy, dx = np.meshgrid(oy, oy, indexing="ij")
-        keep = dx * dx + dy * dy <= radius * radius
-        _DISC_CACHE[radius] = (dx[keep], dy[keep])
-    return _DISC_CACHE[radius]
+def _humanoid_offsets(
+    radius: int, bucket: int, buckets: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Pixel offsets of a pre-rendered humanoid pose (cached per key).
+
+    The figure (head + torso) is drawn upright facing north, rotated so it
+    faces the bucket's heading, and reduced to an alpha mask — the scatter
+    paints the per-creature color onto these offsets. The rotation angle is
+    ``heading + 90``: measured on pygame-ce, ``rotate(+90)`` turns the
+    north-facing sprite east. Canvas side ~2.9r keeps the diagonal poses
+    unclipped.
+    """
+    key = (radius, bucket, buckets)
+    if key not in _SPRITE_CACHE:
+        side = int(np.ceil(2.9 * radius)) + 3
+        if side % 2 == 0:
+            side += 1
+        surf = pygame.Surface((side, side), pygame.SRCALPHA)
+        c = side // 2
+        head_r = max(1, int(round(radius * 0.38)))
+        head_cy = c - int(round(radius * 0.55))
+        pygame.draw.circle(surf, (255, 255, 255, 255), (c, head_cy), head_r)
+        bw = max(2, int(round(radius * 1.1)))
+        bh = max(2, int(round(radius * 1.0)))
+        body_top = head_cy + head_r - max(1, radius // 4)
+        pygame.draw.rect(surf, (255, 255, 255, 255), (c - bw // 2, body_top, bw, bh))
+        heading = (bucket + 0.5) * (360.0 / buckets)
+        rot = pygame.transform.rotate(surf, heading + 90.0)
+        alpha = pygame.surfarray.pixels_alpha(rot)
+        ox, oy = np.nonzero(alpha > 127)
+        ox = ox.astype(np.int32) - rot.get_width() // 2
+        oy = oy.astype(np.int32) - rot.get_height() // 2
+        _SPRITE_CACHE[key] = (ox, oy)
+    return _SPRITE_CACHE[key]
 
 
 def pixel_format(surface: pygame.Surface) -> PixelFormat:
@@ -85,10 +118,16 @@ class FrameBuffers:
 
 
 def make_food_lut(settings: Settings) -> np.ndarray:
-    """256-entry RGB lookup: food energy (0..capacity) -> color."""
-    lut = np.zeros((256, 3), dtype=np.uint8)
+    """256-entry RGB lookup: food energy (0..capacity) -> color.
+
+    ``food_gamma`` bends the ramp before interpolation: values < 1 lift the
+    midtones so persistent patches read against the depleted background.
+    """
     ramp = np.arange(256, dtype=np.float64)
+    if settings.food_gamma != 1.0:
+        ramp = 255.0 * (ramp / 255.0) ** settings.food_gamma
     stops = np.array([0.0, 140.0, 255.0])
+    lut = np.zeros((256, 3), dtype=np.uint8)
     for c in range(3):
         values = (settings.food_low[c], settings.food_mid[c], settings.food_high[c])
         lut[:, c] = np.interp(ramp, stops, values).astype(np.uint8)
@@ -142,7 +181,12 @@ def stamp_creatures(
     settings: Settings,
     shifts: PixelFormat,
 ) -> None:
-    """Scatter every living creature onto ``pixels`` ((w, h) uint32)."""
+    """Scatter every living creature as an oriented humanoid sprite.
+
+    Grouping key = ``(radius, heading bucket)`` (at most
+    ``max_radius_px * sprite_buckets`` poses); one vectorized pass paints
+    each group with its pose's alpha mask.
+    """
     vh = pixels.shape[1]
     vw = pixels.shape[0]
     slots = np.flatnonzero(world.alive)
@@ -156,22 +200,31 @@ def stamp_creatures(
         world.genome[slots, size_trait] * camera.zoom * settings.size_scale
     ).astype(np.int32)
     np.clip(radius, 1, settings.max_radius_px, out=radius)
+    buckets = int(settings.sprite_buckets)
+    two_pi = np.float32(2.0 * np.pi)
+    bucket = (
+        (world.angle[slots] % two_pi) / np.float32(two_pi / buckets)
+    ).astype(np.int32) % buckets
+    key = radius * buckets + bucket
     colors = rgb_to_pixel(creature_colors(world, settings), shifts)
 
-    order = np.argsort(radius, kind="stable")
-    radius = radius[order]
+    order = np.argsort(key, kind="stable")
+    key = key[order]
     ix = ix[order]
     iy = iy[order]
     colors = colors[order]
-    unique, starts = np.unique(radius, return_index=True)
-    ends = np.append(starts[1:], radius.size)
+    unique, starts = np.unique(key, return_index=True)
+    ends = np.append(starts[1:], key.size)
 
-    for k, r in enumerate(unique):
+    for k, kv in enumerate(unique):
         a, b = int(starts[k]), int(ends[k])
-        dxs, dys = _disc(int(r))
-        xs = (ix[a:b, None] + dxs[None, :]).ravel()
-        ys = (iy[a:b, None] + dys[None, :]).ravel()
-        cols = np.repeat(colors[a:b], dxs.size)
+        r, ib = divmod(int(kv), buckets)
+        ox, oy = _humanoid_offsets(r, ib, buckets)
+        if ox.size == 0:
+            continue
+        xs = (ix[a:b, None] + ox[None, :]).ravel()
+        ys = (iy[a:b, None] + oy[None, :]).ravel()
+        cols = np.repeat(colors[a:b], ox.size)
         ok = (xs >= 0) & (xs < vw) & (ys >= 0) & (ys < vh)
         if ok.all():
             pixels[xs, ys] = cols
@@ -242,3 +295,155 @@ def draw_overlay(
 
     radius = max(int(np.rint(float(world.genome[slot, traits + 1]) * camera.zoom)), 3)
     pygame.draw.circle(screen, settings.selection, (cx, cy), radius + 2, 1)
+
+
+@dataclass
+class Flash:
+    """One birth/death flash: world position, body size, color, frame age."""
+
+    x: float
+    y: float
+    size: float  # body size trait; pixel radius recomputed per frame (zoom)
+    color: tuple[int, int, int]
+    age: int = 0
+
+
+class EventTracker:
+    """Render-side birth/death flashes from successive alive masks.
+
+    Diffing frames (plus the ``deaths_*`` counter deltas for the death
+    color) keeps the simulation untouched: recording a run stays
+    bit-identical to running it headless.
+    """
+
+    def __init__(self, world) -> None:
+        self.prev_alive = world.alive.copy()
+        self.prev_counters = self._counters(world)
+        self.flashes: deque[Flash] = deque()
+
+    @staticmethod
+    def _counters(world) -> tuple[int, int, int]:
+        return (
+            int(world.deaths_famine),
+            int(world.deaths_age),
+            int(world.deaths_predation),
+        )
+
+    def update(self, world, settings: Settings) -> None:
+        """Age existing flashes and append this frame's births/deaths."""
+        for f in self.flashes:
+            f.age += 1
+        while self.flashes and self.flashes[0].age >= settings.flash_duration:
+            self.flashes.popleft()
+
+        alive = world.alive
+        born = np.flatnonzero(alive & ~self.prev_alive)
+        died = np.flatnonzero(self.prev_alive & ~alive)
+        if born.size or died.size:
+            size_trait = world.config.brain_params + 1
+            for slot in born:
+                self.flashes.append(
+                    Flash(
+                        float(world.pos[slot, 0]),
+                        float(world.pos[slot, 1]),
+                        float(world.genome[slot, size_trait]),
+                        settings.flash_birth,
+                    )
+                )
+            if died.size:
+                color = self._death_color(world, settings)
+                for slot in died:
+                    self.flashes.append(
+                        Flash(
+                            float(world.pos[slot, 0]),
+                            float(world.pos[slot, 1]),
+                            float(world.genome[slot, size_trait]),
+                            color,
+                        )
+                    )
+            while len(self.flashes) > settings.flash_max:
+                self.flashes.popleft()
+
+        self.prev_alive = alive.copy()
+        self.prev_counters = self._counters(world)
+
+    def _death_color(self, world, settings: Settings) -> tuple[int, int, int]:
+        """Dominant cause of this frame's deaths (per-slot causes are not
+        stored; a frame is almost always one cohort dying together)."""
+        now = self._counters(world)
+        delta = [now[i] - self.prev_counters[i] for i in range(3)]
+        if delta[2] > 0 and delta[2] >= delta[0] and delta[2] >= delta[1]:
+            return settings.flash_predation
+        if delta[0] >= delta[1]:
+            return settings.flash_famine
+        return settings.flash_age
+
+
+class SparkTracker:
+    """Ring buffers feeding the panel's world sparkline (one sample/frame)."""
+
+    def __init__(self, settings: Settings) -> None:
+        n = settings.sparkline_samples
+        self.alive: deque[int] = deque(maxlen=n)
+        self.energy: deque[float] = deque(maxlen=n)
+
+    def sample(self, world) -> None:
+        self.alive.append(int(world.alive_count))
+        alive = world.alive
+        self.energy.append(
+            float(world.energy[alive].mean()) if world.alive_count else 0.0
+        )
+
+
+def draw_trail(
+    overlay: pygame.Surface,
+    points: np.ndarray,
+    camera: Camera,
+    settings: Settings,
+) -> None:
+    """Fade polyline of the selected creature's recent path (world coords).
+
+    Segments that jump across a torus wrap are skipped so the trail never
+    streaks across the whole viewport.
+    """
+    n = points.shape[0]
+    if n < 2:
+        return
+    vw, vh = camera.viewport
+    sx, sy = camera.world_to_screen(points)
+    base = np.asarray(settings.trail_color, dtype=np.float64)
+    for i in range(1, n):
+        x0, y0 = float(sx[i - 1]), float(sy[i - 1])
+        x1, y1 = float(sx[i]), float(sy[i])
+        if abs(x1 - x0) > 0.5 * vw or abs(y1 - y0) > 0.5 * vh:
+            continue
+        t = i / (n - 1)
+        alpha = int(40 + 180 * t)
+        color = (int(base[0]), int(base[1]), int(base[2]), alpha)
+        pygame.draw.line(
+            overlay, color, (int(x0), int(y0)), (int(x1), int(y1)), 1
+        )
+
+
+def render_flashes(
+    overlay: pygame.Surface,
+    flashes: deque[Flash],
+    camera: Camera,
+    settings: Settings,
+) -> None:
+    """Semi-transparent circles over fresh births/deaths (RGBA on overlay)."""
+    for f in flashes:
+        t = f.age / settings.flash_duration
+        if t >= 1.0:
+            continue
+        alpha = int(200.0 * (1.0 - t))
+        if alpha <= 0:
+            continue
+        radius = int(np.rint(f.size * camera.zoom * settings.size_scale)) + 2
+        radius = max(3, min(radius, settings.max_radius_px + 3))
+        sx, sy = camera.world_to_screen(
+            np.array([[f.x, f.y]], dtype=np.float32)
+        )
+        cx, cy = int(sx[0]), int(sy[0])
+        color = (f.color[0], f.color[1], f.color[2], alpha)
+        pygame.draw.circle(overlay, color, (cx, cy), radius)

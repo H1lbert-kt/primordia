@@ -12,6 +12,7 @@ dependencies = [
 render = [
     "pygame-ce>=2.5",
     "matplotlib>=3.8",
+    "pillow>=10",
 ]
 dev = [
     "pytest>=8",
@@ -20,6 +21,9 @@ dev = [
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["primordia", "primordia.render"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

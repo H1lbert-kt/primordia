@@ -44,10 +44,29 @@ class Settings:
     food_low: tuple[int, int, int] = (8, 16, 10)
     food_mid: tuple[int, int, int] = (28, 110, 55)
     food_high: tuple[int, int, int] = (150, 245, 150)
+    food_gamma: float = 0.75  # <1 lifts midtones: patches read against depletion
 
     # creature scatter: pixel radius = clamp(round(size * zoom * size_scale), 1, max)
     size_scale: float = 2.4
     max_radius_px: int = 6
+    sprite_buckets: int = 16  # heading pre-rendered as N/S/E/W x diagonals
+
+    # selected-creature trail (world coords, app-side ring buffer)
+    trail_points: int = 300
+    trail_color: tuple[int, int, int] = (150, 200, 255)
+
+    # birth/death flashes (render-side, diffed between frames)
+    flash_duration: int = 40  # frames until a flash fully fades
+    flash_max: int = 400  # cap so birth pulses cannot flood the overlay
+    flash_birth: tuple[int, int, int] = (90, 230, 120)
+    flash_famine: tuple[int, int, int] = (240, 170, 70)
+    flash_age: tuple[int, int, int] = (180, 180, 200)
+    flash_predation: tuple[int, int, int] = (240, 90, 80)
+
+    # world sparkline (alive + mean energy, one sample per rendered frame)
+    sparkline_samples: int = 300
+    spark_alive: tuple[int, int, int] = (120, 200, 255)
+    spark_energy: tuple[int, int, int] = (240, 200, 100)
 
     # simulation speed: ticks advanced per rendered frame
     speed_steps: tuple[int, ...] = (1, 2, 4, 8)

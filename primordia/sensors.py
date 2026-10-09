@@ -3,13 +3,17 @@
 Input vector layout (``Config.sensor_input_dim`` floats, written into
 ``World.sensor_buf``), in fixed order:
 
-    [0 : n_rays)            food energy summed along each ray / (capacity * steps)
-    [n_rays : 2*n_rays)     creatures in cells crossed by each ray / steps
-                            (own cell subtracted, so no self-detection)
-    [2n : 2n+3)             smell: food, creatures and meat (sum of the diet
-                            trait per cell, i.e. "how much prey is near") in
-                            (2r+1)^2 cells around the creature (self excluded)
-    [2n+3 : 2n+5)           internal: energy / (2 * initial_energy), |vel| / max_speed
+    [0 : n_rays)             food energy summed along each ray / (capacity * steps)
+    [n_rays : 2*n_rays)      creatures in cells crossed by each ray / steps
+                             (own cell subtracted, so no self-detection)
+    [2n : 3n)                peak food cell along each ray / capacity — a rich
+                             path reads high even when its sum looks like haze
+    [3n : 3n+3)              smell: food, creatures and meat (sum of the diet
+                             trait per cell, i.e. "how much prey is near") in
+                             (2r+1)^2 cells around the creature (self excluded)
+    [3n+3 : 3n+5)            antennas: food smell on the left / right of the
+                             heading (cross product of heading and cell offset)
+    [3n+5 : 3n+7)            internal: energy / (2 * initial_energy), |vel| / max_speed
 
 Rays march in steps of one cell up to the creature's ``vision_range`` body
 trait, wrapping toroidally like the rest of the world. Creature counts come
@@ -24,6 +28,31 @@ import math
 
 import numpy as np
 from numba import njit, prange
+
+from .config import Config
+
+
+def input_groups(config: Config) -> tuple[tuple[str, slice | np.ndarray], ...]:
+    """Labels and index groups of the input vector, in ``sensor_buf`` order.
+
+    Single source of truth for consumers that display inputs (the viewer
+    panel): indices are derived from Config here, never hardcoded twice.
+    The ray-food group gathers the sum and peak channels (non-contiguous)
+    so the panel shows them as one row.
+    """
+    n = config.n_rays
+    smell = 3 * n
+    return (
+        ("ray food  sum|peak", np.r_[0:n, 2 * n : 3 * n]),
+        ("ray creatures", slice(n, 2 * n)),
+        ("smell food", slice(smell, smell + 1)),
+        ("smell creatures", slice(smell + 1, smell + 2)),
+        ("smell meat", slice(smell + 2, smell + 3)),
+        ("smell left", slice(smell + 3, smell + 4)),
+        ("smell right", slice(smell + 4, smell + 5)),
+        ("energy", slice(smell + 5, smell + 6)),
+        ("speed", slice(smell + 6, smell + 7)),
+    )
 
 
 @njit(cache=True, parallel=True)
@@ -57,7 +86,8 @@ def perceive(
     inv_e = np.float32(1.0) / energy_scale
     smell_side = 2 * smell_r + 1
     inv_smell = np.float32(1.0) / (smell_side * smell_side)
-    base = 2 * n_rays
+    inv_side = np.float32(2.0) * inv_smell  # antennas see ~half the window
+    base = 3 * n_rays
 
     for i in prange(alive.size):
         if not alive[i]:
@@ -91,6 +121,7 @@ def perceive(
                 dy = s * ray_unit[r, 0] + c * ray_unit[r, 1]
                 fs = np.float32(0.0)
                 cs = np.float32(0.0)
+                fmax = np.float32(0.0)
                 for k in range(nsteps):
                     d = (k + 0.5) * step_len
                     px = px0 + dx * d
@@ -113,21 +144,28 @@ def perceive(
                         iy = 0
                     elif iy >= gh:
                         iy = gh - 1
-                    fs = fs + food[iy, ix]
+                    fv = food[iy, ix]
+                    fs = fs + fv
+                    if fv > fmax:
+                        fmax = fv
                     cnt = cell_counts[iy, ix]
                     if ix == ix0 and iy == iy0:
                         cnt = cnt - 1
                     cs = cs + np.float32(cnt)
                 sensor_buf[i, r] = fs * inv_cap * inv_n
                 sensor_buf[i, n_rays + r] = cs * inv_n
+                sensor_buf[i, 2 * n_rays + r] = fmax * inv_cap
         else:
             for r in range(base):
                 sensor_buf[i, r] = 0.0
 
-        # smell: everything in the neighbourhood, self excluded
+        # smell: everything in the neighbourhood, self excluded; the antennas
+        # split the same window by the cross product of heading and offset
         sf = np.float32(0.0)
         sc = np.float32(0.0)
         sm = np.float32(0.0)
+        sf_left = np.float32(0.0)
+        sf_right = np.float32(0.0)
         for dy in range(-smell_r, smell_r + 1):
             for dx in range(-smell_r, smell_r + 1):
                 iy = iy0 + dy
@@ -140,20 +178,28 @@ def perceive(
                     ix = ix + gw
                 while ix >= gw:
                     ix = ix - gw
-                sf = sf + food[iy, ix]
+                fv = food[iy, ix]
+                sf = sf + fv
                 sc = sc + np.float32(cell_counts[iy, ix])
                 sm = sm + cell_diet[iy, ix]
+                cross = c * np.float32(dy) - s * np.float32(dx)
+                if cross < 0.0:
+                    sf_left = sf_left + fv
+                elif cross > 0.0:
+                    sf_right = sf_right + fv
         sensor_buf[i, base] = sf * inv_cap * inv_smell
         sensor_buf[i, base + 1] = (sc - np.float32(1.0)) * inv_smell
         # meat smell excludes my own diet contribution (like the creature count)
         sensor_buf[i, base + 2] = (
             sm - genome[i, traits_off + 3]
         ) * inv_smell
+        sensor_buf[i, base + 3] = sf_left * inv_cap * inv_side
+        sensor_buf[i, base + 4] = sf_right * inv_cap * inv_side
 
         # internal sensors
         speed = math.sqrt(vel[i, 0] * vel[i, 0] + vel[i, 1] * vel[i, 1])
-        sensor_buf[i, base + 3] = energy[i] * inv_e
+        sensor_buf[i, base + 5] = energy[i] * inv_e
         if max_speed_trait > 0.0:
-            sensor_buf[i, base + 4] = np.float32(speed) / max_speed_trait
+            sensor_buf[i, base + 6] = np.float32(speed) / max_speed_trait
         else:
-            sensor_buf[i, base + 4] = 0.0
+            sensor_buf[i, base + 6] = 0.0

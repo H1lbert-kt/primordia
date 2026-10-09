@@ -4,29 +4,36 @@ The viewer only *reads* the world and draws no random numbers, so a windowed
 run advances the simulation exactly like ``--headless`` with the same seed.
 One frame = clock tick, ``speed_steps`` calls to ``advance`` (0 while paused),
 the world surface (food + creature scatter written directly into its packed
-pixel buffer), one selection overlay, the side panel, and two blits.
+pixel buffer), an alpha overlay (selected trail + birth/death flashes), one
+selection overlay, the side panel, and two blits.
 """
 
 from __future__ import annotations
 
 import time
+from collections import deque
 
+import numpy as np
 import pygame
 
 from ..step import advance
 from ..world import World
 from .camera import Camera
 from .draw import (
+    EventTracker,
     FrameBuffers,
+    SparkTracker,
     draw_food,
     draw_overlay,
+    draw_trail,
     make_food_lut,
     pick_creature,
     pixel_format,
+    render_flashes,
     rgb_to_pixel,
     stamp_creatures,
 )
-from .panel import Hud, render_panel
+from .panel import Hud, clear_font_cache, render_panel
 from .settings import Settings
 
 
@@ -77,12 +84,17 @@ def run_app(
     sel_age = int(world.age[selected]) if selected >= 0 else -1
     paused = False
     speed_index = 0
-    follow = False
+    follow = selected >= 0  # a preset selection starts tracking its creature
     drag_pos: tuple[int, int] | None = None
     drag_moved = 0
     start_tick = world.tick
     frames = 0
     fps_samples: list[float] = []
+    event_tracker = EventTracker(world)
+    sparks = SparkTracker(settings)
+    trail: deque = deque(maxlen=settings.trail_points)
+    trail_slot = -1  # trail resets whenever the selection changes
+    overlay = pygame.Surface((vw, vh), pygame.SRCALPHA)
     running = True
     t0 = time.perf_counter()
 
@@ -161,10 +173,29 @@ def run_app(
         if follow and selected >= 0:
             camera.follow(world.pos[selected])
 
+        # render-side dynamics (read-only w.r.t. the world, no RNG)
+        event_tracker.update(world, settings)
+        sparks.sample(world)
+        if selected != trail_slot:
+            trail.clear()
+            trail_slot = selected
+        if selected >= 0:
+            trail.append(world.pos[selected].copy())
+
         pixels = pygame.surfarray.pixels2d(world_surface)
         draw_food(pixels, world, camera, lut, buffers)
         stamp_creatures(pixels, world, camera, settings, shifts)
         del pixels
+        overlay.fill((0, 0, 0, 0))
+        if len(trail) >= 2:
+            draw_trail(
+                overlay,
+                np.asarray(trail, dtype=np.float32),
+                camera,
+                settings,
+            )
+        render_flashes(overlay, event_tracker.flashes, camera, settings)
+        world_surface.blit(overlay, (0, 0))
         draw_overlay(world_surface, world, camera, selected, settings)
         render_panel(
             panel_surface,
@@ -176,6 +207,8 @@ def run_app(
                 paused=paused,
                 follow=follow,
                 seed=seed,
+                alive_hist=sparks.alive,
+                energy_hist=sparks.energy,
             ),
             settings,
         )
@@ -193,6 +226,7 @@ def run_app(
     if screenshot_path and frames:
         _save_screenshot(screen, screenshot_path)
     pygame.quit()
+    clear_font_cache()  # pygame.quit() invalidates the cached Font objects
     return {
         "frames": frames,
         "ticks": world.tick - start_tick,

@@ -21,7 +21,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 STATE_ARRAYS = (
     "pos", "vel", "angle", "energy", "age", "genome", "species_id",
-    "parent_id", "creature_id", "alive", "free_list", "food",
+    "parent_id", "creature_id", "alive", "free_list", "food", "food_field",
+    "hidden_prev",
 )
 COUNTERS = (
     "tick", "births", "deaths_famine", "deaths_age", "deaths_predation",
@@ -96,6 +97,14 @@ def test_continuation_identical(tmp_path: Path) -> None:
 def test_unsupported_format_version(tmp_path: Path) -> None:
     path = tmp_path / "future.npz"
     np.savez(path, format_version=np.int32(FORMAT_VERSION + 999))
+    with pytest.raises(ValueError, match="format"):
+        load_world(str(path))
+
+
+def test_v1_save_is_rejected_clearly(tmp_path: Path) -> None:
+    """Pre-stage-9 saves lack food_field; the version gate must say so."""
+    path = tmp_path / "old.npz"
+    np.savez(path, format_version=np.int32(1))
     with pytest.raises(ValueError, match="format"):
         load_world(str(path))
 

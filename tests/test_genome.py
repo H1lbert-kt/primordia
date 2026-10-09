@@ -40,6 +40,22 @@ def birth_of_one_parent(cfg: Config, seed: int = 2) -> tuple[World, int, int]:
     return w, parent, int(children[0])
 
 
+def test_child_starts_with_empty_memory() -> None:
+    """The Elman state is world state, but never inherited across births."""
+    cfg = Config(
+        max_creatures=10,
+        initial_creatures=5,
+        reproduce_threshold=100.0,
+    )
+    w, parent, child = birth_of_one_parent(cfg)
+    w.hidden_prev[parent] = 0.7  # simulate a lived-in parent...
+    step.phase_reproduce(w)  # (a second birth, parent still eligible)
+    kids = np.flatnonzero(w.alive & (w.parent_id == w.creature_id[parent]))
+    assert kids.size >= 1
+    assert np.all(w.hidden_prev[kids] == 0.0)
+    assert w.hidden_prev[child].max() <= 0.0  # the first child too
+
+
 def test_reproduce_splits_energy() -> None:
     cfg = Config(max_creatures=10, initial_creatures=5, reproduce_threshold=100.0)
     w = World(cfg, seed=0)

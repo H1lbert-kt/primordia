@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import math
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, fields
 from typing import ClassVar
 
 
@@ -29,7 +30,7 @@ class Config:
     max_creatures: int = 2000  # fixed array capacity (SoA allocation)
     initial_creatures: int = 500
     initial_energy: float = 50.0
-    max_age: int = 5000  # ticks; death when age >= max_age
+    max_age: int = 2000  # ticks; death when age >= max_age
 
     # --- metabolism ---
     metabolic_cost: float = 0.05  # energy drained per tick while alive
@@ -40,6 +41,15 @@ class Config:
     initial_food: float = 60.0  # energy per cell at t=0
     eat_rate: float = 4.0  # max energy a creature extracts per tick
 
+    # --- food patches (stage 9: persistent foraging landscape) ---
+    # Local carrying capacity K per cell: value noise in
+    # [1 - amplitude, 1] * capacity. Growth refills toward K, not toward the
+    # global capacity, so rich and poor patches persist instead of the world
+    # flattening into a uniform sea of food. amplitude = 0 restores the
+    # uniform field exactly.
+    food_patch_amplitude: float = 0.85  # 0 = uniform K at food_capacity
+    food_patch_scale: float = 60.0  # world units between noise lattice points
+
     # --- sensors (ray fan + smell) ---
     n_rays: int = 7
     field_of_view: float = math.pi  # radians covered by the ray fan
@@ -47,7 +57,9 @@ class Config:
     smell_radius_cells: int = 1  # (2r+1)^2 cells sensed around the creature
 
     # --- brain ---
-    hidden_size: int = 12
+    # 10 keeps brain_params at 423 (with the 28 inputs + W_rec), inside the
+    # 100-500 parameter budget; 12 would push it to 535.
+    hidden_size: int = 10
     weight_init_std: float = 0.5  # std of N(0, std) weights drawn at spawn
 
     # --- locomotion (cinematic: vel = dir(angle) * max_speed * accel) ---
@@ -88,6 +100,10 @@ class Config:
             raise ValueError("need 0 <= initial_food <= food_capacity")
         if not 0.0 <= self.food_growth_rate <= 1.0:
             raise ValueError("food_growth_rate must be in [0, 1]")
+        if not 0.0 <= self.food_patch_amplitude <= 1.0:
+            raise ValueError("food_patch_amplitude must be in [0, 1]")
+        if self.food_patch_scale <= 0.0:
+            raise ValueError("food_patch_scale must be positive")
         if self.eat_rate <= 0.0:
             raise ValueError("eat_rate must be positive")
         if self.n_rays < 1 or self.hidden_size < 1:
@@ -131,17 +147,45 @@ class Config:
 
     @property
     def sensor_input_dim(self) -> int:
-        """Per-creature input vector: ray food + ray creatures + smell + internal."""
-        return self.n_rays * 2 + 3 + 2
+        """Inputs: 3 ray channels (food sum, creatures, food peak), 3 smells,
+        2 food antennas (left/right of heading) and 2 internal sensors."""
+        return self.n_rays * 3 + 7
 
     @property
     def brain_params(self) -> int:
-        """MLP weights and biases: W1 (hid, in) + b1 + W2 (out, hid) + b2."""
-        return self.hidden_size * (self.sensor_input_dim + 1) + self.N_OUTPUTS * (
-            self.hidden_size + 1
+        """MLP + recurrence: W1 (hid, in) + b1 + W2 (out, hid) + b2
+        + W_rec (hid, hid) — the Elman recurrent weights, no other state."""
+        return (
+            self.hidden_size * (self.sensor_input_dim + 1)
+            + self.N_OUTPUTS * (self.hidden_size + 1)
+            + self.hidden_size * self.hidden_size
         )
 
     @property
     def genome_size(self) -> int:
         """Exact genome rows: brain parameters followed by body traits."""
         return self.brain_params + self.N_BODY_TRAITS
+
+
+def load_config(path: str, base: Config | None = None) -> Config:
+    """Build a Config from a JSON overrides file applied on top of ``base``.
+
+    The file is a flat object of Config field names (stage-8 ``--config``);
+    fields it does not mention keep their value from ``base`` (or the
+    defaults). Unknown names fail with :class:`ValueError` so a typo cannot
+    silently create a dead option, and the merged result still goes through
+    ``Config.__post_init__`` validation.
+    """
+    with open(path, encoding="utf-8") as fh:
+        overrides = json.load(fh)
+    if not isinstance(overrides, dict):
+        raise ValueError(f"{path}: expected a JSON object of Config fields")
+    allowed = {f.name for f in fields(Config)}
+    unknown = sorted(set(overrides) - allowed)
+    if unknown:
+        raise ValueError(f"{path}: unknown Config fields {unknown}")
+    merged = asdict(base or Config()) | overrides
+    try:
+        return Config(**merged)
+    except TypeError as exc:
+        raise ValueError(f"{path}: bad override value ({exc})") from exc

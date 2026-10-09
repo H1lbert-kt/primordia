@@ -42,11 +42,17 @@ from .world import World
 
 
 @njit(cache=True, parallel=True)
-def _grow_food(food: np.ndarray, rate: np.float32, capacity: np.float32) -> None:
+def _grow_food(
+    food: np.ndarray, field: np.ndarray, rate: np.float32
+) -> None:
+    """Refill each cell toward its local capacity ``field`` (stage-9 patches).
+
+    With ``field == food_capacity`` everywhere this is the stage-8 behavior.
+    """
     for i in prange(food.shape[0]):
         for j in range(food.shape[1]):
             f = food[i, j]
-            food[i, j] = f + rate * (capacity - f)
+            food[i, j] = f + rate * (field[i, j] - f)
 
 
 @njit(cache=True, parallel=True)
@@ -161,7 +167,7 @@ def phase_rebuild_counts(world: World) -> None:
 
 def phase_grow_food(world: World) -> None:
     cfg = world.config
-    _grow_food(world.food, np.float32(cfg.food_growth_rate), np.float32(cfg.food_capacity))
+    _grow_food(world.food, world.food_field, np.float32(cfg.food_growth_rate))
 
 
 def phase_age_and_metabolize(world: World) -> None:
@@ -217,6 +223,7 @@ def phase_think(world: World) -> None:
     think(
         world.sensor_buf,
         world.hidden_buf,
+        world.hidden_prev,
         world.actions,
         world.alive,
         world.genome,
@@ -438,6 +445,7 @@ def phase_reproduce(world: World) -> None:
         world.energy,
         world.alive,
         world.genome,
+        world.hidden_prev,
         world.species_id,
         world.parent_id,
         world.creature_id,

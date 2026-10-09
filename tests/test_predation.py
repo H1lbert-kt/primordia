@@ -162,7 +162,7 @@ def test_meat_smell_sensor() -> None:
     cfg = Config(max_creatures=8, initial_creatures=2)
     w = World(cfg, seed=0)
     me, prey = np.flatnonzero(w.alive)
-    meat_idx = 2 * cfg.n_rays + 2  # third smell channel
+    meat_idx = 3 * cfg.n_rays + 2  # third smell channel (layout in sensors.py)
     _place(w, me, 500.0, 500.0, 30.0, diet=0.0)
     _place(w, prey, 507.0, 500.0, 30.0, diet=1.0)  # adjacent smell cell
     step.phase_rebuild_counts(w)

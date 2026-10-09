@@ -70,6 +70,7 @@ def _reproduce(
     energy: np.ndarray,
     alive: np.ndarray,
     genome: np.ndarray,
+    hidden_prev: np.ndarray,
     species_id: np.ndarray,
     parent_id: np.ndarray,
     creature_id: np.ndarray,
@@ -120,6 +121,8 @@ def _reproduce(
         # Clone, then mutate only the child.
         for g in range(n_genes):
             genome[child, g] = genome[i, g]
+        for h in range(hidden_prev.shape[1]):
+            hidden_prev[child, h] = 0.0  # the child starts with no memory
 
         for g in range(traits_off):
             if np.random.random() < mutation_rate:

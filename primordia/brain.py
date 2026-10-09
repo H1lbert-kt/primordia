@@ -2,12 +2,16 @@
 
 Genome layout per creature (float32 row, offsets derived from ``Config``):
 
-    W1 (hidden, inputs)  [0, hid*in)          # hidden-major: inner loop contiguous
-    b1                   [hid*in, +hid)
-    W2 (outputs, hidden) [+hid, +hid + out*hid)
-    b2                   [+out, +out + out)
-    body traits          [brain_params, +4)   # max_speed, size, vision_range, diet
+    W1 (hidden, inputs)    [0, hid*in)          # hidden-major: inner loop contiguous
+    b1                     [hid*in, +hid)
+    W2 (outputs, hidden)   [+hid, +hid + out*hid)
+    b2                     [+out, +out + out)
+    W_rec (hidden, hidden) [+out, +hid*hid)     # Elman recurrence
+    body traits            [brain_params, +4)   # max_speed, size, vision_range, diet
 
+``think`` is an Elman network: each hidden unit also reads the previous
+tick's hidden state (``hidden_prev``) through ``W_rec``, then the new state
+is committed back — short-term memory without any new randomness.
 ``think`` stores raw output logits in ``actions``; ``apply_actions`` maps them
 to motion (cinematic: vel = dir(angle) * max_speed * accel) and converts the
 eat logit into a gate in ``(0, 1)`` that ``step`` applies when foraging.
@@ -24,6 +28,7 @@ from numba import njit, prange
 def think(
     sensor_buf: np.ndarray,
     hidden_buf: np.ndarray,
+    hidden_prev: np.ndarray,
     actions: np.ndarray,
     alive: np.ndarray,
     genome: np.ndarray,
@@ -31,11 +36,16 @@ def think(
     n_hid: np.int32,
     n_out: np.int32,
 ) -> None:
-    """One forward pass per living creature: inputs -> hidden -> raw logits."""
+    """One recurrent forward pass: inputs + hidden_prev -> hidden -> logits.
+
+    Commits the new hidden state into ``hidden_prev`` for the next tick
+    (dead slots keep their stale row until respawn zeroes it).
+    """
     w1_off = 0
     b1_off = n_hid * n_in
     w2_off = b1_off + n_hid
     b2_off = w2_off + n_hid * n_out
+    wrec_off = b2_off + n_out
 
     for i in prange(alive.size):
         if not alive[i]:
@@ -45,7 +55,12 @@ def think(
             row = w1_off + j * n_in
             for k in range(n_in):
                 acc = acc + sensor_buf[i, k] * genome[i, row + k]
+            rec = wrec_off + j * n_hid
+            for h in range(n_hid):
+                acc = acc + hidden_prev[i, h] * genome[i, rec + h]
             hidden_buf[i, j] = np.tanh(acc)
+        for j in range(n_hid):
+            hidden_prev[i, j] = hidden_buf[i, j]
         for o in range(n_out):
             acc = genome[i, b2_off + o]
             row = w2_off + o * n_hid

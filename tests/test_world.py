@@ -32,6 +32,8 @@ def test_dtypes_and_shapes() -> None:
     assert w.creature_id.dtype == np.int32
     assert w.genealogy.shape == (cfg.genealogy_capacity, 3)
     assert w.genealogy.dtype == np.int32
+    assert w.hidden_prev.shape == (n, cfg.hidden_size)
+    assert w.hidden_prev.dtype == np.float32
     assert w.alive.dtype == np.bool_
     assert w.food.dtype == np.float32
     assert w.alive_count == cfg.initial_creatures
@@ -64,7 +66,7 @@ def test_determinism_same_seed() -> None:
     w2 = World(cfg, seed=42)
     for _ in range(500):
         advance(w2)
-    arrays = ("pos", "vel", "angle", "energy", "age", "genome", "species_id", "parent_id", "creature_id", "alive", "food")
+    arrays = ("pos", "vel", "angle", "energy", "age", "genome", "species_id", "parent_id", "creature_id", "alive", "food", "hidden_prev")
     for name in arrays:
         assert np.array_equal(getattr(w1, name), getattr(w2, name)), name
     assert (w1.births, w1.deaths_famine, w1.deaths_age) == (
@@ -139,3 +141,35 @@ def test_free_list_recycles_dead_slots() -> None:
     assert np.all(w.alive[slots])
     assert np.all(w.energy[slots] == cfg.initial_energy)
     assert np.all(w.parent_id[slots] == -1)
+
+
+def test_food_field_patches() -> None:
+    """Stage-9: K is heterogeneous within bounds; amplitude 0 = uniform."""
+    uniform = World(make_config(food_patch_amplitude=0.0), seed=3)
+    assert np.all(uniform.food_field == uniform.config.food_capacity)
+
+    cfg = make_config()
+    w = World(cfg, seed=3)
+    field = w.food_field
+    assert field.shape == w.food.shape and field.dtype == np.float32
+    assert field.std() > 1.0  # real patches, not a flat field
+    lo = cfg.food_capacity * (1.0 - cfg.food_patch_amplitude)
+    assert field.min() >= lo - 1e-3
+    assert field.max() <= cfg.food_capacity + 1e-3
+
+
+def test_food_field_deterministic() -> None:
+    a = World(make_config(), seed=9)
+    b = World(make_config(), seed=9)
+    assert np.array_equal(a.food_field, b.food_field)
+    c = World(make_config(), seed=10)
+    assert not np.array_equal(a.food_field, c.food_field)
+
+
+def test_patches_persist_under_growth() -> None:
+    """Food still follows the terrain after hundreds of ticks (no flattening)."""
+    w = World(make_config(), seed=5)
+    for _ in range(300):
+        advance(w)
+    corr = np.corrcoef(w.food.ravel(), w.food_field.ravel())[0, 1]
+    assert corr > 0.7

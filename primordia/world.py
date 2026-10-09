@@ -8,12 +8,14 @@ never resized. Array dtypes are part of the module contract:
     energy (N,) float32, age (N,) int32, genome (N,G) float32,
     species_id (N,) int32, parent_id (N,) int32, creature_id (N,) int32,
     alive (N,) bool, free_list (N,) int32, food (H,W) float32,
+    food_field (H,W) float32 (local capacity K, stage 9 patches),
     cell_counts (H,W) int32,
     cell_diet (H,W) float32, cell_offsets (H*W+1,) int32,
     cell_slots (N,) int32, cell_cursor (H*W,) int32 scratch,
     genealogy (L,3) int32,   # birth log rows (tick, child_id, parent_id)
     ray_unit (n_rays,2) float32,
     sensor_buf (N, input_dim) float32, hidden_buf (N, hidden) float32,
+    hidden_prev (N, hidden) float32,   # Elman state: last tick's hidden (saved)
     actions (N, 3) float32   # scratch buffers, zeroed once, reused every tick
 
 ``creature_id`` is a monotonic birth id (``next_id`` counts up); dead slots
@@ -131,6 +133,8 @@ class World:
         self.free_list = np.arange(n, dtype=np.int32)
         self.free_count = n
 
+        # Elman recurrent state: persists across ticks (save/load world state)
+        self.hidden_prev = np.zeros((n, config.hidden_size), dtype=np.float32)
         # Scratch buffers reused every tick (never reallocated inside a tick).
         self.sensor_buf = np.zeros((n, config.sensor_input_dim), dtype=np.float32)
         self.hidden_buf = np.zeros((n, config.hidden_size), dtype=np.float32)
@@ -174,6 +178,49 @@ class World:
         self.genealogy_used = 0
         self.genealogy_overflow = 0
         self.spawn(config.initial_creatures)
+        # Local carrying capacity per cell (stage 9 patches). Drawn after
+        # spawn so initial positions match the stage-8 stream for a seed.
+        self.food_field = self._make_food_field()
+
+    def _make_food_field(self) -> np.ndarray:
+        """Value-noise field K: per-cell capacity in [1-amp, 1] * capacity.
+
+        Growth refills toward K instead of the global capacity, so rich and
+        poor patches persist. ``amplitude = 0`` returns the uniform field
+        (bit-identical to the stage-8 behavior). Uses ``World.rng`` (the
+        NumPy stream), never the Numba stream; the result is saved and
+        restored by ``io`` like any other state array.
+        """
+        cfg = self.config
+        gh, gw = self.food.shape
+        amp = cfg.food_patch_amplitude
+        if amp <= 0.0:
+            return np.full((gh, gw), cfg.food_capacity, dtype=np.float32)
+        step = max(1, int(round(cfg.food_patch_scale / float(cfg.cell_size))))
+        lh = max(1, (gh + step - 1) // step)
+        lw = max(1, (gw + step - 1) // step)
+        lattice = self.rng.uniform(0.0, 1.0, (lh, lw)).astype(np.float32)
+        ys = np.arange(gh, dtype=np.float32) / step
+        xs = np.arange(gw, dtype=np.float32) / step
+        y0 = np.floor(ys).astype(np.int64)
+        x0 = np.floor(xs).astype(np.int64)
+        fy = (ys - y0).astype(np.float32)[:, None]
+        fx = (xs - x0).astype(np.float32)[None, :]
+        y0 %= lh
+        x0 %= lw
+        y1 = (y0 + 1) % lh
+        x1 = (x0 + 1) % lw
+        v00 = lattice[np.ix_(y0, x0)]
+        v01 = lattice[np.ix_(y0, x1)]
+        v10 = lattice[np.ix_(y1, x0)]
+        v11 = lattice[np.ix_(y1, x1)]
+        noise = (
+            v00 * (1.0 - fy) * (1.0 - fx)
+            + v01 * (1.0 - fy) * fx
+            + v10 * fy * (1.0 - fx)
+            + v11 * fy * fx
+        )
+        return (cfg.food_capacity * (1.0 - amp + amp * noise)).astype(np.float32)
 
     @property
     def alive_count(self) -> int:
@@ -221,6 +268,7 @@ class World:
         self.angle[slots] = self.rng.uniform(0.0, 2.0 * np.pi, count)
         self.energy[slots] = cfg.initial_energy
         self.age[slots] = 0
+        self.hidden_prev[slots] = 0.0  # newborns start with an empty memory
 
         params = cfg.brain_params
         self.genome[slots, :params] = self.rng.normal(

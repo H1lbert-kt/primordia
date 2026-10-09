@@ -14,8 +14,8 @@ def first_alive(w: World) -> int:
     return int(np.flatnonzero(w.alive)[0])
 
 
-def offsets(cfg: Config) -> tuple[int, int, int, int]:
-    """(w1, b1, w2, b2) offsets for a config, mirroring brain.py's layout."""
+def offsets(cfg: Config) -> tuple[int, int, int, int, int]:
+    """(w1, b1, w2, b2, wrec) offsets for a config, mirroring brain.py."""
     n_in = cfg.sensor_input_dim
     n_hid = cfg.hidden_size
     n_out = Config.N_OUTPUTS
@@ -23,23 +23,26 @@ def offsets(cfg: Config) -> tuple[int, int, int, int]:
     b1 = w1 + n_hid * n_in
     w2 = b1 + n_hid
     b2 = w2 + n_out * n_hid
-    return w1, b1, w2, b2
+    wrec = b2 + n_out
+    return w1, b1, w2, b2, wrec
 
 
 def test_genome_layout() -> None:
     cfg = Config()
-    assert cfg.sensor_input_dim == 19  # 7*2 rays + 3 smell + 2 internal
-    assert cfg.brain_params == 279  # 12*20 + 3*13
+    assert cfg.sensor_input_dim == 28  # 7*3 rays + 3 smell + 2 antennas + 2 internal
+    assert cfg.brain_params == 423  # 10*29 + 3*11 + 10*10 (W1, W2, W_rec)
     assert 100 <= cfg.brain_params <= 500
-    assert cfg.genome_size == cfg.brain_params + Config.N_BODY_TRAITS == 283
+    assert cfg.genome_size == cfg.brain_params + Config.N_BODY_TRAITS == 427
 
-    _w1, _b1, _w2, b2 = offsets(cfg)
-    assert b2 + Config.N_OUTPUTS == cfg.brain_params
+    _w1, _b1, _w2, b2, wrec = offsets(cfg)
+    assert b2 + Config.N_OUTPUTS == wrec
+    assert wrec + cfg.hidden_size**2 == cfg.brain_params
 
     w = World(cfg, seed=0)
     assert w.genome.shape == (cfg.max_creatures, cfg.genome_size)
     assert w.sensor_buf.shape == (cfg.max_creatures, cfg.sensor_input_dim)
     assert w.hidden_buf.shape == (cfg.max_creatures, cfg.hidden_size)
+    assert w.hidden_prev.shape == (cfg.max_creatures, cfg.hidden_size)
     assert w.actions.shape == (cfg.max_creatures, Config.N_OUTPUTS)
     # body traits are filled from Config at spawn
     t = cfg.brain_params
@@ -48,10 +51,10 @@ def test_genome_layout() -> None:
 
 
 def test_forward_hand_computed() -> None:
-    cfg = Config(n_rays=1, hidden_size=2)  # input_dim 6, params 23
+    cfg = Config(n_rays=1, hidden_size=2)  # input_dim 10, params 35
     w = World(cfg, seed=1)
     slot = first_alive(w)
-    _w1, _b1, w2, _b2 = offsets(cfg)
+    _w1, _b1, w2, _b2, _wrec = offsets(cfg)
     n_in = cfg.sensor_input_dim
     n_hid = cfg.hidden_size
 
@@ -78,11 +81,33 @@ def test_forward_hand_computed() -> None:
     assert w.actions[slot, 2] == pytest.approx(h0 - h1, abs=1e-5)
 
 
+def test_recurrent_state_drives_hidden() -> None:
+    """W_rec feeds the previous hidden state into the next one (Elman)."""
+    cfg = Config(n_rays=1, hidden_size=2)
+    w = World(cfg, seed=4)
+    slot = first_alive(w)
+    _w1, b1, w2, _b2, wrec = offsets(cfg)
+
+    w.genome[slot] = 0.0  # no sensor weights: hidden = tanh(W_rec @ prev)
+    w.genome[slot, wrec + 0] = 1.0  # hidden0 <- prev hidden0
+    w.genome[slot, wrec + 1 * cfg.hidden_size + 1] = 1.0  # hidden1 <- prev hidden1
+    w.genome[slot, w2 + 0 * cfg.hidden_size + 0] = 1.0  # out0 <- hidden0
+    w.sensor_buf[slot] = 0.0
+    w.hidden_prev[slot] = (0.9, -0.4)
+
+    step.phase_think(w)
+
+    assert w.actions[slot, 0] == pytest.approx(np.tanh(0.9), abs=1e-5)
+    # the new state is committed for the next tick
+    assert w.hidden_prev[slot, 0] == pytest.approx(np.tanh(0.9), abs=1e-5)
+    assert w.hidden_prev[slot, 1] == pytest.approx(np.tanh(-0.4), abs=1e-5)
+
+
 def test_outputs_drive_motion() -> None:
     cfg = Config(max_creatures=4, initial_creatures=1)
     w = World(cfg, seed=2)
     slot = first_alive(w)
-    _w1, _b1, _w2, b2 = offsets(cfg)
+    _w1, _b1, _w2, b2, _wrec = offsets(cfg)
 
     w.genome[slot] = 0.0
     w.genome[slot, cfg.brain_params] = cfg.max_speed  # restore trait zeroed above
@@ -102,7 +127,7 @@ def test_outputs_drive_motion() -> None:
 
 def test_eat_gate() -> None:
     cfg = Config(max_creatures=4, initial_creatures=1, food_growth_rate=0.0)
-    _w1, _b1, _w2, b2 = offsets(cfg)
+    _w1, _b1, _w2, b2, _wrec = offsets(cfg)
 
     def run(gate_logit: float) -> tuple[float, float]:
         w = World(cfg, seed=3)

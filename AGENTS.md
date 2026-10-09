@@ -13,7 +13,90 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
 - Código, identificadores, comentários, docstrings, mensagens de commit e
   README principal em **inglês**.
 
-## Estado atual do repositório (verificado em 2026-10-08)
+## Estado atual do repositório (verificado em 2026-10-09)
+- **Etapa 9 ("mundo que ensina") Fases A–F5 concluídas:**
+  planos em `.opencode/plans/etapa-9-mundo-que-ensina.md` (+ roadmap
+  10–13 do usuário). Ordem aprovada F1→F5. **F1** painel guiado:
+  `input_groups(cfg)` em `sensors.py` (layout de entradas documentado e
+  testado, guia "click a creature...", `overrides.example.json`,
+  `--select` por creature id). **F2** `food_field` (campo contínuo
+  200×200, patches com `food_patch_amplitude/size`, crescimento por
+  célula em `_grow_food`, save **v2** = `food_field` + `format_version`);
+  `STAGE8_BASE = {"food_patch_amplitude": 0.0}` em `experiments/_common.py`
+  aplicado nos 4 `run.py` (caches intactos). GATE 5000 ticks aceito pelo
+  usuário: energia cicla 1650–3650, famine 71–95/run, pop 2000,
+  food_std 18.6 (patch) vs 9.8 (uniforme), ray_std 0.15–0.19,
+  turn_std 0.51–0.72, predation 0; limitação honesta: patches sozinhos
+  não eliminam os círculos em 5000 ticks. **F3** render: sprites
+  humanoides (`_humanoid_offsets`, face norte + α = heading+90, agrupados
+  por (raio,bucket)), gamma 0.75 na LUT de comida, trilha e flashes de
+  morte (`EventTracker`/`Flash`/`draw_trail`, overlay SRCALPHA antes de
+  `draw_overlay`), sparklines + legenda **só no overview**, auto-follow
+  ao selecionar, fix: `clear_font_cache()` após `pygame.quit()` (2ª
+  chamada de `run_app` quebrava). **F4** Elman + sentidos ricos:
+  `hidden_prev (N,hid) float32` persistente (save v2 + v1 → `ValueError`),
+  `think` com `W_rec` em `b2+N_OUT` (`hid²`=100 params), `hidden_size`
+  default **12→10** p/ caber no orçamento → **28 in / 423 brain_params /
+  427 genome_size** (meta 100–500); sensores `3*n_rays+7` (soma+**pico**
+  por raio + antenas esq/dir por produto cruzado, `input_groups` com
+  índice ndarray p/ "sum|peak"); painel: `W2|b2 (3x11)` +
+  `W_rec (10x10)` lado a lado, W1 cell 10 (29 colunas). **Suíte 73
+  passed** (`pytest -q`, 197 s). Evidências visuais: screenshots SDL
+  dummy `/tmp/opencode/f4_selected.png` (painel completo com W_rec) e
+  `f4_overview.png` (sparklines+legenda). **F5 concluída:** bench limpo
+  **335/116/80** a 500/2000/5000 (load 2.4, piso 3.9x — ver
+  "Desempenho"), `docs/demo.gif` regenerado (9000 ticks, 29 frames,
+  **2.25 MB**; README não cita tamanho do GIF, nada a atualizar),
+  painel fit verde (`test_panel`). Segunda amostra limpa: **269/121/62**
+  (faixa 2 runs, load 2–3: 269–335 / 116–121 / 62–80 → tabela do README
+  atualizada). Honestidade de publicação no `/cp`: README principal
+  corrigido (genoma 427 / 28 inputs, 73 testes, bench etapa 9, roadmap
+  1–9, descrição do viewer) + nota **Reproducibility** no README top e
+  nos 4 experimentos (números vieram do snapshot pré-etapa-9, genoma
+  19-in/283; rerun em HEAD repete o protocolo mas muda trajetória;
+  re-baseline em HEAD = tarefa pós-commit opcional). **Decisão de
+  commit: 1 único** (etapa 8 + 9) — dividir exigiria reconstruir
+  estados de arquivo nunca versionados (`record.py` já com F3,
+  `config.py`/`run.py` misturados), fabricando histórico. Falta só:
+  julgamento visual do usuário (screenshots `/tmp/opencode/
+  f4_selected.png` e `f4_overview.png`).
+- **Etapa 8 concluída (2026-10-08; entra no commit único com a etapa
+  9 antes do push):** `--config` pronto
+  (`load_config(path, base)` em `config.py` + flag em `run.py`; campo
+  desconhecido → `ValueError`, `--config` com `--load` → erro de CLI;
+  `tests/test_config.py`). Experimento 1 (`experiments/food_supply/`)
+  rodou o sweep completo 6 configs × 3 seeds × 5000 ticks (figuras +
+  README com números reais; `data/` em `.gitignore`). **GATE decidido pelo
+  usuário: `max_age` 5000 → 2000** (ver "Balanceamento"). Helpers em
+  `experiments/_common.py` (cache por npz com staleness, bandas min-max
+  entre seeds). **Fase C concluída:** 3 experimentos novos, cada um com
+  `run.py` + `figs/` + `README.md` com números reais —
+  `mutation_diversity` (trait_mutation_std 0.05/0.10/0.30: genome_dist
+  final 3.34/7.60/12.77, monótono, pop/energia estáveis, curvas em
+  degraus nos pulsos de virada), `predation` (resultado negativo
+  honesto: 0/3/2 mortes por predação por run; diet_mean ≤ 0.0093;
+  escassez de comida dobra a dieta mas a mordida `bite_rate*diet` é
+  pequena demais para pagar — armadilha/ratchet documentada),
+  `lineage` (~5600 nascimentos em pulsos, 49–56 famílias sobreviventes
+  de 500 fundadores, top-10 = 74–77% da pop, profundidade mediana 6–7,
+  overflow 0). **Fase D concluída:** `primordia/render/record.py`
+  (`WorldRecorder` + `assemble_gif`: captura read-only em superfícies
+  offscreen com SDL dummy, PNGs numerados em `DIR/frames/`, GIF via
+  Pillow com downscale ≤960 px/paleta 256), CLI `--record DIR` +
+  `--record-every K` (exige `--headless`; tick 0 sempre capturado),
+  `tests/test_record.py` (read-only+determinismo e GIF completo) —
+  `pytest -q` **56 passed**. `docs/demo.gif` gerado: 9000 ticks seed 42,
+  29 frames, 3.00 MB (orçamento <4 MB; frames vivem em `docs/frames/`,
+  gitignored). Evidência: `frame_00001` de `docs/` é bit-idêntico a
+  re-render tick 320 em processo novo. **Fase E concluída:** `README.md`
+  (EN: GIF topo, conceito, install `pip install -e ".[render,dev]"`,
+  4 descobertas com números reais e figuras, bench, reprodução),
+  `LICENSE` (MIT, copyright `H1lbert-kt` 2026), `pyproject.toml`
+  (+`pillow>=10` no extra `render`; `[tool.setuptools] packages`
+  explícitos — auto-discovery falhava no layout flat), `gh repo edit`
+  (descrição nova + 8 topics: simulation, artificial-life,
+  neural-networks, evolution, numba, numpy, pygame,
+  agent-based-modeling). **Etapa 8 pronta para commit (`/cp`).**
 - **Etapa 7 de 8 concluída**: salvar/carregar + árvore genealógica —
   `primordia/io.py` (`save_world`/`load_world`, npz **formato v1** com
   `format_version`; versão desconhecida → `ValueError`; salva só o estado
@@ -28,8 +111,8 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   `id/parent`. RNG: `genome.get/set_numba_rng_state` via
   `numba._helperlib.rnd_get_np_state_ptr` (API **privada**, verificada em
   numba 0.68, é a da suite do numba; guard em `tests/test_io.py`).
-  Testes novos em `tests/test_io.py` (**48 no total**; guard importa
-  `primordia.io`).
+  Testes novos em `tests/test_io.py` (**54 no total** com
+  `tests/test_config.py`; guard importa `primordia.io`).
 - **Continuação idêntica provada na CLI:** 2500 ticks contínuos ==
   2000 + `--save` + `--load` + 500 — arrays, contadores e log bit-a-bit
   (seed 42, N=2000); em-processo no teste `test_continuation_identical`
@@ -41,27 +124,43 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   500/2000/5000; A/B alternado oscila na mesma faixa nos dois lados —
   ruído domina, sem regressão atribuível. Piso 30 @N=2000 cumprido com
   3–6x. Re-medir o bench quando a máquina estiver com load <3.
+- **Etapa 8 (config + max_age, 2026-10-08):** bench sob load 5–6 (dois
+  runs seguidos): **259–344 / 85–93 / 58–64** a 500/2000/5000 — piso 30
+  @N=2000 cumprido com ~3x; nenhum código do tick mudou (só default de
+  `Config.max_age`, caminho quente idêntico), variação é ruído de carga.
+  Re-medir com load <3.
 - **Stats (etapa 6, ainda válido):** custo de `record` ~0.5 ms/tick;
   **nunca voltar `@` no `genome_dist`** (bug OpenBLAS: 35 ticks/s, usar
   `np.einsum` sem `optimize`); runs longos com `--stats` custam ~40% de
   ticks/s (medição antiga, load 3–10).
-- **Balanceamento (5000 ticks, seeds 42/7, mesmas conclusões das etapas
-  5/6):** pop no cap 2000; energia média 52 → **7669/8397** e ainda
-  subindo (sem teto); `deaths_predation = 0`, `diet_mean ≤ 0.0007`; cliff
-  de idade do spawn inicial no tick 5000 (free-list LIFO, coerente);
-  `vision_std ≈ 0.9` domina a diversidade, `genome_dist` estável ~0.36.
-  Candidatos de ajuste (decisão do usuário, sem hacks): menos comida
-  (`food_growth_rate`/`eat_rate`), custo metabólico maior, ou
-  `trait_mutation_std` maior.
+- **Balanceamento (GATE da etapa 8, resolvido 2026-10-08):** o sweep do
+  `experiments/food_supply/` (6 configs: `food_growth_rate {0.01,0.05,0.10}`
+  × `metabolic_cost {0.05,0.15}`, 3 seeds, 5000 ticks) mostrou que esses
+  dois knobs **só mudam a inclinação** do crescimento de energia
+  (~1.43–1.87 e/tick), nunca a estrutura: pop sempre no cap, predação 0,
+  mortalidade real ~100 fomes/run. Causa raiz: com pop no cap,
+  `_reproduce` (`genome.py`) pula o pai sem gastar energia quando não há
+  slot livre → único sumidouro é metabolismo+movimento < ingestão.
+  **Decisão do usuário: `max_age` 5000 → 2000** (default novo). Validação
+  (seeds 42/7, 5000 ticks): energia agora limitada em ciclo ~1000–4000
+  (final 3381/3029, era 7669/8397 subindo sem parar), ~4400 mortes por
+  idade/run com nascimentos em pulsos ao longo do run (eram ~391 só no
+  cliff final; free-list LIFO sincroniza coortes), pop segue estável em
+  2000, `diet_mean` 0.001–0.005 (predação ainda inerte — é a pergunta do
+  experimento `predation`). `pytest -q` (54) verde com o default novo.
 - Predação/dieta ativas prontas; experimentos/README/GIFs (etapa 8).
-- `pytest -q` (48 passed), `python -m primordia.bench [--profile]`,
+- `pytest -q` (73 passed), `python -m primordia.bench [--profile]`,
   `run.py --headless --ticks N [--stats out.npz] [--save w.npz]`,
   `run.py --load w.npz --headless --ticks N`,
-  `python plot.py out.npz --out figs/` e `run.py --seed 42` (janela)
-  funcionam. `--config` e o plot da árvore genealógica ficam na etapa 8.
+  `python plot.py out.npz --out figs/`, `run.py --seed 42` (janela),
+  `run.py --config overrides.json` e
+  `run.py --headless --ticks 9000 --record docs --record-every 320`
+  (frames + GIF demo) funcionam. Plot da árvore genealógica
+  ficou fora do catálogo aprovado da etapa 8 (lineage usa o log com
+  métricas agregadas).
 - **Planos das etapas** ficam em `.opencode/plans/*.md` (não versionados).
 - Ambiente em `.venv` (Python **3.14.7**): numpy 2.5.3, numba 0.68.0,
-  pygame-ce 2.5.8, matplotlib 3.11.2, pytest 9.1.1. Verificado: `@njit` +
+  pygame-ce 2.5.8, matplotlib 3.11.2, Pillow 12.3.0, pytest 9.1.1. Verificado: `@njit` +
   `prange` compilam e `import pygame` funciona.
 - **Não há ruff/mypy/black instalados.** Não instale nada novo sem perguntar.
 - Use o venv: `source .venv/bin/activate` ou `.venv/bin/python ...`.
@@ -178,6 +277,25 @@ run.py           # CLI: --seed --headless --ticks --load --save --stats
   total; confie no profile por fase). Profile por fase: `reproduce`
   16 → **23 µs** (id + log, sem draws novos) — único custo da etapa no
   tick. Piso 30 @N=2000 cumprido com 3–6x. Re-medir com load <3.
+- **Etapa 9 F4 (2026-10-09):** bench sob **load 6–18** (runc/containers
+  saturando o box durante a medição): 44–49/21–22/17–18 a 500/2000/5000 —
+  **não conclusivo** (N=2000 abaixo do piso, mas a carga explicaria).
+  Profile por fase sob carga: `sum(phases)` 38.7 ms (~26 t/s), fases
+  "planas" (perceive 26% / think 25% / apply 21% / integrate 26%) —
+  overhead de agendamento de threads domina kernels pequenos sob carga,
+  shares não comparáveis com runs limpos. Custos esperados do F4 no tick
+  (estimativa FLOPs): think +~55% (28 in + W_rec·prev) ≈ +13% do tick.
+  **Re-medir com load <3 antes de declarar o piso cumprido**; se <30,
+  investigar (candidatos: cópia hidden_prev→hidden_buf em think,
+  28 inputs em perceive).
+- **Etapa 9 F4 — re-medição limpa (2026-10-09):** janela silenciosa
+  (load 2.4 antes do bench; o processo "Main"/container de 115% CPU
+  terminou): **335/116/80 ticks/s** a 500/2000/5000 — piso 30 @N=2000
+  cumprido com **3.9x**, faixa igual ou melhor que a etapa 8 (85–93 sob
+  load 5–6) → **sem regressão atribuível ao F4**. Demo GIF regenerado na
+  mesma janela: 9000 ticks em 83.1 s (108 t/s) → 29 frames, **2.25 MB**
+  (era 3.00; orçamento <4 MB; backup do antigo em
+  `/tmp/opencode/demo_stage8_3.00mb.gif`).
 - O Numba usa todas as 8 threads lógicas: rode benchmark e simulação em
   **sequência**. Dois processos Numba paralelos se pisoteiam e o ticks/s cai
   ~20x (medido em 2026-10-06: 19 ticks/s em paralelo vs ~8000 em sequência).
