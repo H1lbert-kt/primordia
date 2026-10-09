@@ -14,6 +14,47 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   README principal em **inglês**.
 
 ## Estado atual do repositório (verificado em 2026-10-09)
+- **Etapa 10 ("ambiente físico") concluída (2026-10-09, commit pendente
+  de `/cp`):** plano em `.opencode/plans/etapa-10-ambiente.md` (fases A–F);
+  decisões do usuário: luz vira input → layout **29 in / 433 brain_params /
+  437 genome**, amplitude do terreno = fração de terra (`n < 1−amp` →
+  0.0 exato; `amp = 0` = terreno off sem desenhar RNG). **Leis físicas**
+  puras em `primordia/cycles.py`: `L(t) = 1 − day_amp·0.5·(1 −
+  cos(2πt/day_period))` ∈ [1−amp, 1], `S(t) = 1 + season_amp·sin(2πt/
+  season_period)`, `growth_multiplier = S·L` cru (o *rate* aplicado em
+  `phase_grow_food` é `min(rate·mult, 1.0)` — clampar o produto matava o
+  boom sazonal, bug pego por teste). Terreno: `_make_terrain()` value-noise
+  compartilhado com os patches (RNG após o spawn; amplitude 0 não desenha),
+  água `terrain == 0.0`: não cresce comida e move custa
+  `move_cost·|v|²·water_move_cost`. `perceive` ganhou `light`: visão =
+  `visão·L(t)` (à noite encolhe) + 8º input. **io `FORMAT_VERSION = 3`**
+  (terrain salvo; v1/v2 → ValueError; luz/estações não são salvas — são
+  funções do tick). **Render:** `make_terrain_lut` (água/shore/verde),
+  blend por célula `lerp(terreno, comida, comida/cap) × L` num passe
+  200×200 por frame, sprites × L, overlays em brilho cheio, HUD `light`
+  (`/tmp/opencode/stage10_overview.png`). **Fase E:** luz 0.75 ×
+  fertilidade ~0.43 corta a oferta ~60% → sweep `food_growth_rate
+  {0.04…0.27}` × seeds 42/7 × 6000 → default **0.02→0.12** (pop 1283–1471
+  @6k, na faixa da 9.5). **GATE 3 seeds (42/7/123) × 10k:** duro ✓ — sem
+  extinção (min 110–161), pop média 1058–1436 < 0.95·cap,
+  frac(E≥limiar) 0.01–0.11 < 0.5; medido — fome **26–37%** (faixa 25–40
+  ✓), ocupação `mean(terrain|vivas) − mean(map)` **+0.17…+0.22** (nicho ✓),
+  correlação alimento×S(t) **r 0.39–0.59** (janela = 1.25 ciclos, honesto),
+  comida de dia ~5% acima da noite (0.058 vs 0.057 vel. média), predação
+  **1926/2/1** (seed 42: 0 até tick 7k, estouro de onívoros no boom final
+  com pop no cap; nenhum dieta>0.5 vivo nos snapshots), deslocamento vs
+  baseline 9.5 (mesma seed, terreno/ciclos off): **+20/−4/+45%** (misturado).
+  Honestidade: pop *final* = 2000 (pico do serrilhano) em todos os runs do
+  gate, e fome na marca 10k (26–37%) acima da faixa 11–27% da 9.5. **Bench**
+  (load 5.6 → 2.6): **846/201/236** e **1533/700/430** a 500/2000/5000 —
+  piso 30 @N=2000 com 6.7–23× (pop do bench nova: alive_final
+  223/597/1203). GIF `docs/demo.gif` regenerado (9000 ticks, 26 frames,
+  **0.99 MB** — frames noturnos comprimem melhor; orçamento <4 MB).
+  `STAGE8_BASE` += `terrain_amplitude/season_amp/day_amp: 0` (reruns
+  mantêm o regime da 8; staleness do cache é por nº de ticks, não
+  invalida). README: genoma **437** / **29 inputs** / **92 testes** /
+  bench etapa 10 / seção "A world that pushes back". **Testes: 92
+  passed.** Próximo passo do usuário: `/cp`.
 - **Etapa 9.5 ("o mundo precisa doer") concluída (2026-10-09):** plano em
   `.opencode/plans/etapa-9.5-balanco-e-pressao-seletiva.md`; roadmap
   "mundo real" aprovado em `.opencode/plans/roadmap-mundo-real.md`
@@ -189,7 +230,7 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   2000, `diet_mean` 0.001–0.005 (predação ainda inerte — é a pergunta do
   experimento `predation`). `pytest -q` (54) verde com o default novo.
 - Predação/dieta ativas prontas; experimentos/README/GIFs (etapa 8).
-- `pytest -q` (76 passed), `python -m primordia.bench [--profile]`,
+- `pytest -q` (92 passed), `python -m primordia.bench [--profile]`,
   `run.py --headless --ticks N [--stats out.npz] [--save w.npz]`,
   `run.py --load w.npz --headless --ticks N`,
   `python plot.py out.npz --out figs/`, `run.py --seed 42` (janela),
@@ -478,7 +519,7 @@ antes de dizer que uma mudança de tick não regrediu desempenho.
 9.5. Balanço e pressão seletiva (economia, turn_cost, zoom) ✓
 
 Roadmap "mundo real" aprovado (`.opencode/plans/roadmap-mundo-real.md`):
-10 ambiente (terreno/estações/luz) → 11 biologia (sexualidade/doença)
+10 ambiente (terreno/estações/luz) ✓ → 11 biologia (sexualidade/doença)
 → 12 ecologia (ciclos tróficos) → 13–16 civilização+ (antiga 10–13).
 
 Trabalhe **apenas na etapa que o usuário indicar**.

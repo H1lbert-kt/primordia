@@ -9,6 +9,7 @@ never resized. Array dtypes are part of the module contract:
     species_id (N,) int32, parent_id (N,) int32, creature_id (N,) int32,
     alive (N,) bool, free_list (N,) int32, food (H,W) float32,
     food_field (H,W) float32 (local capacity K, stage 9 patches),
+    terrain (H,W) float32 (fertility in [0,1], exact 0.0 = water, stage 10),
     cell_counts (H,W) int32,
     cell_diet (H,W) float32, cell_offsets (H*W+1,) int32,
     cell_slots (N,) int32, cell_cursor (H*W,) int32 scratch,
@@ -181,22 +182,20 @@ class World:
         # Local carrying capacity per cell (stage 9 patches). Drawn after
         # spawn so initial positions match the stage-8 stream for a seed.
         self.food_field = self._make_food_field()
+        # Terrain (stage 10) uses the same noise machinery from the same
+        # NumPy stream, drawn after food_field so spawn and patch history
+        # stay unchanged; amplitude 0 draws nothing.
+        self.terrain = self._make_terrain()
 
-    def _make_food_field(self) -> np.ndarray:
-        """Value-noise field K: per-cell capacity in [1-amp, 1] * capacity.
+    def _value_noise(self, scale: float) -> np.ndarray:
+        """Bilinear value noise in [0, 1] on a lattice spaced ``scale`` world
+        units apart (wraps toroidally, one ``rng.uniform`` draw).
 
-        Growth refills toward K instead of the global capacity, so rich and
-        poor patches persist. ``amplitude = 0`` returns the uniform field
-        (bit-identical to the stage-8 behavior). Uses ``World.rng`` (the
-        NumPy stream), never the Numba stream; the result is saved and
-        restored by ``io`` like any other state array.
+        Shared by ``food_field`` (patches) and ``terrain`` (stage 10); the
+        draw order and shapes are what make a seed's fields reproducible.
         """
-        cfg = self.config
         gh, gw = self.food.shape
-        amp = cfg.food_patch_amplitude
-        if amp <= 0.0:
-            return np.full((gh, gw), cfg.food_capacity, dtype=np.float32)
-        step = max(1, int(round(cfg.food_patch_scale / float(cfg.cell_size))))
+        step = max(1, int(round(scale / float(self.config.cell_size))))
         lh = max(1, (gh + step - 1) // step)
         lw = max(1, (gw + step - 1) // step)
         lattice = self.rng.uniform(0.0, 1.0, (lh, lw)).astype(np.float32)
@@ -214,13 +213,50 @@ class World:
         v01 = lattice[np.ix_(y0, x1)]
         v10 = lattice[np.ix_(y1, x0)]
         v11 = lattice[np.ix_(y1, x1)]
-        noise = (
+        return (
             v00 * (1.0 - fy) * (1.0 - fx)
             + v01 * (1.0 - fy) * fx
             + v10 * fy * (1.0 - fx)
             + v11 * fy * fx
         )
+
+    def _make_food_field(self) -> np.ndarray:
+        """Value-noise field K: per-cell capacity in [1-amp, 1] * capacity.
+
+        Growth refills toward K instead of the global capacity, so rich and
+        poor patches persist. ``amplitude = 0`` returns the uniform field
+        (bit-identical to the stage-8 behavior). Uses ``World.rng`` (the
+        NumPy stream), never the Numba stream; the result is saved and
+        restored by ``io`` like any other state array.
+        """
+        cfg = self.config
+        gh, gw = self.food.shape
+        amp = cfg.food_patch_amplitude
+        if amp <= 0.0:
+            return np.full((gh, gw), cfg.food_capacity, dtype=np.float32)
+        noise = self._value_noise(cfg.food_patch_scale)
         return (cfg.food_capacity * (1.0 - amp + amp * noise)).astype(np.float32)
+
+    def _make_terrain(self) -> np.ndarray:
+        """Terrain fertility with amplitude as the land share (stage 10).
+
+        Raw value noise ``n``; cells with ``n < 1 - amplitude`` become water
+        (stored as **exact 0.0** so kernels use an ``== 0`` compare), land is
+        rescaled to (0, 1]. ``amplitude = 0`` returns flat fertility 1.0
+        without drawing RNG — the pre-stage-10 world (no water, uniform
+        growth target).
+        """
+        cfg = self.config
+        gh, gw = self.food.shape
+        amp = cfg.terrain_amplitude
+        if amp <= 0.0:
+            return np.full((gh, gw), 1.0, dtype=np.float32)
+        noise = self._value_noise(cfg.terrain_scale)
+        threshold = 1.0 - amp
+        terrain = (noise - threshold) / amp
+        terrain[noise < threshold] = 0.0  # water: exact zero
+        np.clip(terrain, 0.0, 1.0, out=terrain)
+        return terrain.astype(np.float32)
 
     @property
     def alive_count(self) -> int:

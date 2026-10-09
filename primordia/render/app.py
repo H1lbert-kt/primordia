@@ -16,6 +16,7 @@ from collections import deque
 import numpy as np
 import pygame
 
+from ..cycles import light_level
 from ..step import advance
 from ..world import World
 from .camera import Camera
@@ -23,14 +24,14 @@ from .draw import (
     EventTracker,
     FrameBuffers,
     SparkTracker,
-    draw_food,
     draw_overlay,
     draw_trail,
+    draw_world,
     make_food_lut,
+    make_terrain_lut,
     pick_creature,
     pixel_format,
     render_flashes,
-    rgb_to_pixel,
     stamp_creatures,
 )
 from .panel import Hud, clear_font_cache, render_panel
@@ -68,7 +69,8 @@ def run_app(
     world_surface = pygame.Surface((vw, vh))
     panel_surface = pygame.Surface((settings.panel_width, vh))
     shifts = pixel_format(world_surface)
-    lut = rgb_to_pixel(make_food_lut(settings), shifts)
+    food_lut = make_food_lut(settings)
+    terrain_lut = make_terrain_lut(settings)
     buffers = FrameBuffers.create(vw, vh)
     camera = Camera(
         settings,
@@ -183,8 +185,9 @@ def run_app(
             trail.append(world.pos[selected].copy())
 
         pixels = pygame.surfarray.pixels2d(world_surface)
-        draw_food(pixels, world, camera, lut, buffers)
-        stamp_creatures(pixels, world, camera, settings, shifts)
+        light = float(light_level(cfg, world.tick))
+        draw_world(pixels, world, camera, food_lut, terrain_lut, light, shifts, buffers)
+        stamp_creatures(pixels, world, camera, settings, shifts, light)
         del pixels
         overlay.fill((0, 0, 0, 0))
         if len(trail) >= 2:

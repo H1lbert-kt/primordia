@@ -37,6 +37,7 @@ import numpy as np
 from numba import njit, prange
 
 from .brain import apply_actions, think
+from .cycles import growth_multiplier, light_level
 from .genome import _reproduce
 from .sensors import perceive
 from .world import World
@@ -44,16 +45,19 @@ from .world import World
 
 @njit(cache=True, parallel=True)
 def _grow_food(
-    food: np.ndarray, field: np.ndarray, rate: np.float32
+    food: np.ndarray, field: np.ndarray, terrain: np.ndarray, rate: np.float32
 ) -> None:
-    """Refill each cell toward its local capacity ``field`` (stage-9 patches).
+    """Refill each cell toward K = ``field * terrain`` (stages 9 + 10).
 
-    With ``field == food_capacity`` everywhere this is the stage-8 behavior.
+    Terrain is flat 1.0 when disabled, which reduces the target to
+    ``field`` exactly — the stage-9 behavior. Water cells (terrain == 0.0)
+    target 0: they never grow food and drain what they inherited.
     """
     for i in prange(food.shape[0]):
         for j in range(food.shape[1]):
             f = food[i, j]
-            food[i, j] = f + rate * (field[i, j] - f)
+            target = field[i, j] * terrain[i, j]
+            food[i, j] = f + rate * (target - f)
 
 
 @njit(cache=True, parallel=True)
@@ -62,14 +66,36 @@ def _age_and_metabolize(
     age: np.ndarray,
     alive: np.ndarray,
     vel: np.ndarray,
+    pos: np.ndarray,
     cost: np.float32,
     move_cost: np.float32,
+    terrain: np.ndarray,
+    inv_cell_w: np.float32,
+    inv_cell_h: np.float32,
+    water_move_cost: np.float32,
 ) -> None:
+    """Age, then drain metabolism plus movement (x water multiplier, stage 10)."""
+    gh = terrain.shape[0]
+    gw = terrain.shape[1]
     for i in prange(alive.size):
         if alive[i]:
             age[i] = age[i] + 1
             speed2 = vel[i, 0] * vel[i, 0] + vel[i, 1] * vel[i, 1]
-            energy[i] = energy[i] - cost - move_cost * speed2
+            move = move_cost * speed2
+            # swimming costs extra: water cells are exact 0.0 in terrain
+            cx = int(pos[i, 0] * inv_cell_w)
+            cy = int(pos[i, 1] * inv_cell_h)
+            if cx < 0:
+                cx = 0
+            elif cx >= gw:
+                cx = gw - 1
+            if cy < 0:
+                cy = 0
+            elif cy >= gh:
+                cy = gh - 1
+            if terrain[cy, cx] == 0.0:
+                move = move * water_move_cost
+            energy[i] = energy[i] - cost - move
 
 
 @njit(cache=True)
@@ -168,7 +194,12 @@ def phase_rebuild_counts(world: World) -> None:
 
 def phase_grow_food(world: World) -> None:
     cfg = world.config
-    _grow_food(world.food, world.food_field, np.float32(cfg.food_growth_rate))
+    # season x light (stage 10): pure function of the tick, no state; the
+    # applied rate is clamped to [0, 1] so a strong boom cannot overshoot
+    # K and drive food negative (f + r*(K-f) with r in [0,1] stays in [f,K])
+    scale = float(growth_multiplier(cfg, world.tick))
+    rate = min(cfg.food_growth_rate * scale, 1.0)
+    _grow_food(world.food, world.food_field, world.terrain, np.float32(rate))
 
 
 def phase_age_and_metabolize(world: World) -> None:
@@ -178,8 +209,13 @@ def phase_age_and_metabolize(world: World) -> None:
         world.age,
         world.alive,
         world.vel,
+        world.pos,
         np.float32(cfg.metabolic_cost),
         np.float32(cfg.move_cost),
+        world.terrain,
+        np.float32(1.0 / world.cell_w),
+        np.float32(1.0 / world.cell_h),
+        np.float32(cfg.water_move_cost),
     )
 
 
@@ -192,6 +228,9 @@ def phase_perceive(world: World) -> None:
     energy_scale = cfg.initial_energy * 2.0
     if energy_scale <= 0.0:
         energy_scale = 1.0
+    # ambient light (stage 10): shortens rays at night and feeds the
+    # "light" input; same pure formula the renderer reads
+    light = light_level(cfg, world.tick)
     perceive(
         world.pos,
         world.angle,
@@ -216,6 +255,7 @@ def phase_perceive(world: World) -> None:
         np.float32(cfg.height),
         np.float32(cfg.food_capacity),
         np.float32(energy_scale),
+        light,
     )
 
 

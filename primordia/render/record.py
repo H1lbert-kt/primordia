@@ -21,16 +21,17 @@ from pathlib import Path
 import pygame
 from PIL import Image
 
+from ..cycles import light_level
 from .camera import Camera
 from .draw import (
     EventTracker,
     FrameBuffers,
     SparkTracker,
-    draw_food,
+    draw_world,
     make_food_lut,
+    make_terrain_lut,
     pixel_format,
     render_flashes,
-    rgb_to_pixel,
     stamp_creatures,
 )
 from .panel import Hud, render_panel
@@ -116,7 +117,8 @@ class WorldRecorder:
         self._world_surface = pygame.Surface((vw, vh))
         self._panel_surface = pygame.Surface((s.panel_width, vh))
         self._shifts = pixel_format(self._world_surface)
-        self._lut = rgb_to_pixel(make_food_lut(s), self._shifts)
+        self._food_lut = make_food_lut(s)
+        self._terrain_lut = make_terrain_lut(s)
         self._buffers = FrameBuffers.create(vw, vh)
         self._event_tracker = EventTracker(world)
         self._sparks = SparkTracker(s)
@@ -141,8 +143,12 @@ class WorldRecorder:
         """Render the current world state; write the next PNG frame."""
         s = self.settings
         pixels = pygame.surfarray.pixels2d(self._world_surface)
-        draw_food(pixels, world, self._camera, self._lut, self._buffers)
-        stamp_creatures(pixels, world, self._camera, s, self._shifts)
+        light = float(light_level(world.config, world.tick))
+        draw_world(
+            pixels, world, self._camera,
+            self._food_lut, self._terrain_lut, light, self._shifts, self._buffers,
+        )
+        stamp_creatures(pixels, world, self._camera, s, self._shifts, light)
         del pixels
         # Read-only dynamics: flash diff + sparkline sample (no RNG, so the
         # recorded run stays bit-identical to the headless one).

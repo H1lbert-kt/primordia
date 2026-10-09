@@ -64,6 +64,26 @@ def test_turn_cost_validation() -> None:
         Config(turn_cost=-0.01)
 
 
+def test_environment_validation() -> None:
+    """Stage 10 environment knobs: bounds are enforced with clear messages."""
+    Config(terrain_amplitude=0.0)  # terrain off = pre-stage-10 world
+    Config(season_amp=0.0, day_amp=0.0)  # cycles off
+    with pytest.raises(ValueError, match="terrain_amplitude"):
+        Config(terrain_amplitude=1.5)
+    with pytest.raises(ValueError, match="terrain_scale"):
+        Config(terrain_scale=0.0)
+    with pytest.raises(ValueError, match="water_move_cost"):
+        Config(water_move_cost=0.5)  # water must never be cheaper than land
+    with pytest.raises(ValueError, match="season_period"):
+        Config(season_period=1)
+    with pytest.raises(ValueError, match="day_period"):
+        Config(day_period=1)
+    with pytest.raises(ValueError, match="season_amp"):
+        Config(season_amp=-0.1)
+    with pytest.raises(ValueError, match="day_amp"):
+        Config(day_amp=1.2)
+
+
 def test_unknown_field_fails_loudly(tmp_path: Path) -> None:
     path = write_json(tmp_path / "bad.json", {"food_growht_rate": 0.01})
     with pytest.raises(ValueError, match="unknown Config fields"):

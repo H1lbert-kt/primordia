@@ -48,6 +48,12 @@ class Settings:
     food_high: tuple[int, int, int] = (150, 245, 150)
     food_gamma: float = 0.75  # <1 lifts midtones: patches read against depletion
 
+    # ground LUT (stage 10): shown where food is depleted / in the gaps
+    terrain_water: tuple[int, int, int] = (16, 40, 92)
+    terrain_shore: tuple[int, int, int] = (86, 74, 48)
+    terrain_mid: tuple[int, int, int] = (58, 88, 42)
+    terrain_high: tuple[int, int, int] = (34, 104, 40)
+
     # creature scatter: pixel radius = clamp(round(size * zoom * size_scale), 1, max)
     size_scale: float = 3.0
     max_radius_px: int = 8

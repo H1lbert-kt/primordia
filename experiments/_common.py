@@ -36,9 +36,10 @@ DPI = 120
 # reproducible after later stages change Config defaults. Merge order in the
 # experiment scripts: asdict(Config()) | STAGE8_BASE | variant overrides.
 # Stage 9.5 changed the economy (food_capacity 100->3, eat_rate 4->1, ...);
-# pin the whole stage-8 regime, not just the patch knob, so --force reruns
-# stay in the documented regime (exact bit-reproduction still needs the
-# stage-8 commit: brains gained recurrence in stage 9).
+# stage 10 added terrain, day/night and seasons (off here) — pin the whole
+# old regime, not just one knob, so --force reruns stay documented (exact
+# bit-reproduction still needs the stage-8 commit: brains gained recurrence
+# in stage 9).
 STAGE8_BASE = {
     "food_patch_amplitude": 0.0,  # stage 8 ran on a uniform field
     "food_capacity": 100.0,
@@ -49,6 +50,9 @@ STAGE8_BASE = {
     "move_cost": 0.05,
     "max_turn": 0.6,
     "turn_cost": 0.0,  # did not exist in stage 8: free steering
+    "terrain_amplitude": 0.0,  # stage 10 environment, off for stage-8 runs
+    "season_amp": 0.0,
+    "day_amp": 0.0,
 }
 
 

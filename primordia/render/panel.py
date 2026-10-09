@@ -13,6 +13,7 @@ from dataclasses import dataclass
 import numpy as np
 import pygame
 
+from ..cycles import light_level
 from ..sensors import input_groups
 from .settings import Settings
 
@@ -332,7 +333,7 @@ def render_panel(
         f"age deaths {world.deaths_age}   predation {world.deaths_predation}",
         f"fps {hud.fps:.0f}   sim x{hud.speed}{'  [PAUSED]' if hud.paused else ''}"
         f"{'  [FOLLOW]' if hud.follow else ''}",
-        f"seed {hud.seed}",
+        f"seed {hud.seed}   light {float(light_level(world.config, world.tick)):.2f}",
     )
     for line in stats:
         y = _text(dst, 16, line, x, y, settings.text)

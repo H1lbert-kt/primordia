@@ -40,8 +40,12 @@ class Config:
     # growth*K*cells ~= demand lets famine regulate the population below
     # the cap instead of saturating it. energy per cell is small on purpose:
     # a cell is a meal, not a bank.
+    # Stage 10 recalibration: mean light (0.75) x mean terrain fertility
+    # (~0.43) cut effective supply ~60%, so growth went 0.02 -> 0.12
+    # (sweep 0.04-0.27, seeds 42/7 x 6000 ticks; 0.12 restored the stage
+    # 9.5 pop band without pinning the cap).
     food_capacity: float = 3.0  # max energy stored in one cell
-    food_growth_rate: float = 0.02  # fraction of the deficit refilled per tick
+    food_growth_rate: float = 0.12  # fraction of the deficit refilled per tick
     initial_food: float = 2.0  # energy per cell at t=0
     eat_rate: float = 1.0  # max energy a creature extracts per tick
 
@@ -54,6 +58,33 @@ class Config:
     food_patch_amplitude: float = 0.85  # 0 = uniform K at food_capacity
     food_patch_scale: float = 60.0  # world units between noise lattice points
 
+    # --- terrain (stage 10: geography creates niches) ---
+    # Value noise in [0, 1]; amplitude is the land share: cells whose raw
+    # noise falls below 1 - amplitude become water (stored as exact 0.0),
+    # land fertility is rescaled to (0, 1]. Local growth target is
+    # food_field * terrain, so water never grows food and drains what it
+    # has. amplitude = 0 turns terrain off (flat fertility 1.0, no water).
+    terrain_amplitude: float = 0.85  # 0 = terrain disabled, ~15% water at 0.85
+    terrain_scale: float = 80.0  # world units between noise lattice points
+    # Swimming is not free: move cost multiplier on water cells (>= 1).
+    # A physical law, same framing as move_cost/turn_cost — the amphibious
+    # niche (cheap empty water vs rich costly land) has to emerge.
+    water_move_cost: float = 3.0
+
+    # --- season (stage 10: slow boom/bust on food growth) ---
+    # growth multiplier S(t) = 1 + season_amp * sin(2*pi*t / season_period),
+    # mean 1, so the cycle redistributes food in time instead of adding it.
+    season_period: int = 8000  # ticks between season peaks
+    season_amp: float = 0.5  # 0 = no seasons
+
+    # --- day/night (stage 10: light drives photosynthesis and vision) ---
+    # L(t) = 1 - day_amp * 0.5 * (1 - cos(2*pi*t / day_period)) in
+    # [1 - day_amp, 1]: noon at t = 0 (mod period). Food growth and the
+    # effective ray reach are both proportional to L; creatures also sense
+    # it (the "light" brain input), so circadian behavior can evolve.
+    day_period: int = 400  # ticks per full day
+    day_amp: float = 0.5  # 0 = constant full light
+
     # --- sensors (ray fan + smell) ---
     n_rays: int = 7
     field_of_view: float = math.pi  # radians covered by the ray fan
@@ -61,8 +92,8 @@ class Config:
     smell_radius_cells: int = 1  # (2r+1)^2 cells sensed around the creature
 
     # --- brain ---
-    # 10 keeps brain_params at 423 (with the 28 inputs + W_rec), inside the
-    # 100-500 parameter budget; 12 would push it to 535.
+    # 10 keeps brain_params at 433 (with the 29 inputs + W_rec), inside the
+    # 100-500 parameter budget; 12 would push it well beyond.
     hidden_size: int = 10
     weight_init_std: float = 0.5  # std of N(0, std) weights drawn at spawn
 
@@ -112,6 +143,18 @@ class Config:
             raise ValueError("food_patch_amplitude must be in [0, 1]")
         if self.food_patch_scale <= 0.0:
             raise ValueError("food_patch_scale must be positive")
+        if not 0.0 <= self.terrain_amplitude <= 1.0:
+            raise ValueError("terrain_amplitude must be in [0, 1]")
+        if self.terrain_scale <= 0.0:
+            raise ValueError("terrain_scale must be positive")
+        if self.water_move_cost < 1.0:
+            raise ValueError("water_move_cost must be >= 1 (water never cheaper)")
+        if self.season_period < 2 or self.day_period < 2:
+            raise ValueError("season_period and day_period must be >= 2 ticks")
+        if not 0.0 <= self.season_amp <= 1.0:
+            raise ValueError("season_amp must be in [0, 1]")
+        if not 0.0 <= self.day_amp <= 1.0:
+            raise ValueError("day_amp must be in [0, 1]")
         if self.eat_rate <= 0.0:
             raise ValueError("eat_rate must be positive")
         if self.n_rays < 1 or self.hidden_size < 1:
@@ -158,8 +201,9 @@ class Config:
     @property
     def sensor_input_dim(self) -> int:
         """Inputs: 3 ray channels (food sum, creatures, food peak), 3 smells,
-        2 food antennas (left/right of heading) and 2 internal sensors."""
-        return self.n_rays * 3 + 7
+        2 food antennas (left/right of heading) and 3 internal sensors
+        (energy, speed, ambient light — stage 10's circadian cue)."""
+        return self.n_rays * 3 + 8
 
     @property
     def brain_params(self) -> int:

@@ -1,13 +1,16 @@
 """World rendering: direct writes into the world surface's pixel memory.
 
 Hot paths avoid Python loops over creatures and avoid slow strided writes:
-the food grid is gathered through a camera-cached flat index and expanded to
-packed ``uint32`` pixels with one ``np.take``, then living creatures are
-scattered into the same packed buffer (one vectorized pass per
-``(radius, heading)`` sprite pose). ``pygame.surfarray.pixels2d`` of an owned
+the world pass (terrain + food, stage 10) blends both grids' LUT colors per
+*cell* (200x200 once per frame), dims the result by the ambient light, and
+expands to packed ``uint32`` pixels with one gather through the
+camera-cached flat index; living creatures are then scattered into the same
+packed buffer (one vectorized pass per ``(radius, heading)`` sprite pose,
+also dimmed by the light). ``pygame.surfarray.pixels2d`` of an owned
 surface is contiguous, so every large copy here is contiguous. Only the
 selection overlay (rings, smell circle, seven rays), the selected creature's
-trail and the event flashes use ``pygame.draw``.
+trail and the event flashes use ``pygame.draw`` (those stay at full
+brightness so the UI reads against a night-dark world).
 
 Body-trait layout (see ``Config``): ``brain_params + 0`` max_speed,
 ``+1`` size, ``+2`` vision, ``+3`` diet — the pixel radius comes from size.
@@ -99,29 +102,21 @@ def rgb_to_pixel(rgb: np.ndarray, shifts: PixelFormat) -> np.ndarray:
 
 @dataclass
 class FrameBuffers:
-    """Pre-allocated scratch for the food pass (image-major layout)."""
+    """Pre-allocated scratch for the world pass (image-major layout)."""
 
-    values: np.ndarray  # (viewport_w, viewport_h) float32
-    indices: np.ndarray  # (viewport_w, viewport_h) intp — np.take casts
-    # other integer dtypes to intp internally (a hidden multi-MB copy), so
-    # both the camera cache and this buffer stay in the native index dtype.
     packed: np.ndarray  # (viewport_w, viewport_h) uint32 contiguous pixels
 
     @classmethod
     def create(cls, viewport_width: int, viewport_height: int) -> FrameBuffers:
-        shape = (viewport_width, viewport_height)
-        return cls(
-            values=np.zeros(shape, dtype=np.float32),
-            indices=np.zeros(shape, dtype=np.intp),
-            packed=np.zeros(shape, dtype=np.uint32),
-        )
+        return cls(packed=np.zeros((viewport_width, viewport_height), dtype=np.uint32))
 
 
 def make_food_lut(settings: Settings) -> np.ndarray:
     """256-entry RGB lookup: food energy (0..capacity) -> color.
 
     ``food_gamma`` bends the ramp before interpolation: values < 1 lift the
-    midtones so persistent patches read against the depleted background.
+    midtones so persistent patches read against the depleted background
+    (which now shows the terrain through, stage 10).
     """
     ramp = np.arange(256, dtype=np.float64)
     if settings.food_gamma != 1.0:
@@ -134,8 +129,27 @@ def make_food_lut(settings: Settings) -> np.ndarray:
     return lut
 
 
-def creature_colors(world, settings: Settings) -> np.ndarray:
-    """RGB per living creature: hue from diet, brightness from energy."""
+def make_terrain_lut(settings: Settings) -> np.ndarray:
+    """256-entry RGB lookup: terrain fertility (0..1) -> ground color.
+
+    Index 0 is water (exact 0.0 in the terrain array), everything else ramps
+    shore -> fertile green. Drawn *under* the food pass: rich food covers
+    the ground, depletion reveals it (lakes, shorelines, poor soil).
+    """
+    ramp = np.arange(256, dtype=np.float64)
+    lut = np.zeros((256, 3), dtype=np.uint8)
+    for c in range(3):
+        lut[:, c] = np.interp(
+            ramp, [0.0, 128.0, 255.0],
+            [settings.terrain_shore[c], settings.terrain_mid[c],
+             settings.terrain_high[c]],
+        ).astype(np.uint8)
+    lut[0] = settings.terrain_water
+    return lut
+
+
+def creature_colors(world, settings: Settings, light: float) -> np.ndarray:
+    """RGB per living creature: hue from diet, brightness from energy x light."""
     slots = np.flatnonzero(world.alive)
     if slots.size == 0:
         return np.zeros((0, 3), dtype=np.uint8)
@@ -147,30 +161,37 @@ def creature_colors(world, settings: Settings) -> np.ndarray:
     herb = np.asarray(settings.creature_herbivore, dtype=np.float64)
     pred = np.asarray(settings.creature_predator, dtype=np.float64)
     col = herb[None, :] * (1.0 - diet)[:, None] + pred[None, :] * diet[:, None]
-    return (col * brightness[:, None]).astype(np.uint8)
+    scaled = col * (brightness * light)[:, None]
+    return np.clip(scaled, 0.0, 255.0).astype(np.uint8)
 
 
-def draw_food(
+def draw_world(
     pixels: np.ndarray,
     world,
     camera: Camera,
-    lut: np.ndarray,
+    food_lut: np.ndarray,
+    terrain_lut: np.ndarray,
+    light: float,
+    shifts: PixelFormat,
     buffers: FrameBuffers,
 ) -> None:
-    """Write the food grid into ``pixels`` ((w, h) uint32, packed RGB).
+    """Write terrain + food into ``pixels`` ((w, h) uint32, packed RGB).
 
-    The gather/quantize/expand path runs on contiguous buffers; the final
-    copy into ``pixels`` (the surface's transposed pixel view) is one
-    contiguous-to-strided assignment instead of a strided gather.
+    Per cell: ``rgb = lerp(terrain, food, alpha) * light`` with
+    ``alpha = food / capacity`` — rich food hides the ground, depletion
+    reveals terrain (stage 10). The blend runs on the 200x200 cell grid
+    once per frame; the viewport step is the same single gather as before.
     """
-    np.take(world.food.ravel(), camera.flat_indices(), out=buffers.values)
-    np.multiply(
-        buffers.values, 255.0 / float(world.config.food_capacity), out=buffers.values
-    )
-    np.copyto(buffers.indices, buffers.values, casting="unsafe")
-    # Invariant: 0 <= food <= capacity, so indices stay in [0, 255]; mode
-    # "clip" only guards against floating-point overshoot at the edges.
-    np.take(lut, buffers.indices, axis=0, out=buffers.packed, mode="clip")
+    cap = float(world.config.food_capacity)
+    f_idx = np.clip(world.food * (255.0 / cap), 0.0, 255.0).astype(np.intp)
+    t_idx = np.clip(world.terrain * 255.0, 0.0, 255.0).astype(np.intp)
+    alpha = (f_idx * np.float32(1.0 / 255.0))[..., None]
+    food_rgb = food_lut[f_idx].astype(np.float32)
+    terrain_rgb = terrain_lut[t_idx].astype(np.float32)
+    rgb = (terrain_rgb + (food_rgb - terrain_rgb) * alpha) * float(light)
+    np.clip(rgb, 0.0, 255.0, out=rgb)
+    cell_pixels = rgb_to_pixel(rgb.astype(np.uint8), shifts)
+    np.take(cell_pixels.ravel(), camera.flat_indices(), out=buffers.packed)
     pixels[:] = buffers.packed
 
 
@@ -180,12 +201,14 @@ def stamp_creatures(
     camera: Camera,
     settings: Settings,
     shifts: PixelFormat,
+    light: float,
 ) -> None:
     """Scatter every living creature as an oriented humanoid sprite.
 
     Grouping key = ``(radius, heading bucket)`` (at most
     ``max_radius_px * sprite_buckets`` poses); one vectorized pass paints
-    each group with its pose's alpha mask.
+    each group with its pose's alpha mask. ``light`` dims the sprites with
+    the world (the selection overlay stays bright).
     """
     vh = pixels.shape[1]
     vw = pixels.shape[0]
@@ -206,7 +229,7 @@ def stamp_creatures(
         (world.angle[slots] % two_pi) / np.float32(two_pi / buckets)
     ).astype(np.int32) % buckets
     key = radius * buckets + bucket
-    colors = rgb_to_pixel(creature_colors(world, settings), shifts)
+    colors = rgb_to_pixel(creature_colors(world, settings, light), shifts)
 
     order = np.argsort(key, kind="stable")
     key = key[order]

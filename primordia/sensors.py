@@ -13,12 +13,15 @@ Input vector layout (``Config.sensor_input_dim`` floats, written into
                              (2r+1)^2 cells around the creature (self excluded)
     [3n+3 : 3n+5)            antennas: food smell on the left / right of the
                              heading (cross product of heading and cell offset)
-    [3n+5 : 3n+7)            internal: energy / (2 * initial_energy), |vel| / max_speed
+    [3n+5 : 3n+8)            internal: energy / (2 * initial_energy), |vel| /
+                             max_speed, and ambient light L(t) (stage 10's
+                             circadian cue: what "night" feels like from inside)
 
 Rays march in steps of one cell up to the creature's ``vision_range`` body
-trait, wrapping toroidally like the rest of the world. Creature counts come
-from ``World.cell_counts`` and the meat smell from ``World.cell_diet`` (both
-rebuilt every tick): O(cells + N), never O(N^2).
+trait times the current light level ``L(t)`` (seeing in the dark is seeing
+less far), wrapping toroidally like the rest of the world. Creature counts
+come from ``World.cell_counts`` and the meat smell from ``World.cell_diet``
+(both rebuilt every tick): O(cells + N), never O(N^2).
 No random numbers are drawn in this module.
 """
 
@@ -52,6 +55,7 @@ def input_groups(config: Config) -> tuple[tuple[str, slice | np.ndarray], ...]:
         ("smell right", slice(smell + 4, smell + 5)),
         ("energy", slice(smell + 5, smell + 6)),
         ("speed", slice(smell + 6, smell + 7)),
+        ("light", slice(smell + 7, smell + 8)),
     )
 
 
@@ -80,6 +84,7 @@ def perceive(
     height: np.float32,
     food_capacity: np.float32,
     energy_scale: np.float32,
+    light: np.float32,
 ) -> None:
     """Fill ``sensor_buf[i]`` for every living creature (parallel over slots)."""
     inv_cap = np.float32(1.0) / food_capacity
@@ -109,7 +114,9 @@ def perceive(
 
         c = np.cos(angle[i])
         s = np.sin(angle[i])
-        vision = genome[i, traits_off + 2]
+        # effective reach shrinks with the light (stage 10): at L=1 this is
+        # the stage-9 vision; at L=0 the rays see nothing
+        vision = genome[i, traits_off + 2] * light
         max_speed_trait = genome[i, traits_off]
         nsteps = int(vision / step_len)
 
@@ -203,3 +210,4 @@ def perceive(
             sensor_buf[i, base + 6] = np.float32(speed) / max_speed_trait
         else:
             sensor_buf[i, base + 6] = 0.0
+        sensor_buf[i, base + 7] = light  # ambient light: identical for all

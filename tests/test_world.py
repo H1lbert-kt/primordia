@@ -36,6 +36,8 @@ def test_dtypes_and_shapes() -> None:
     assert w.hidden_prev.dtype == np.float32
     assert w.alive.dtype == np.bool_
     assert w.food.dtype == np.float32
+    assert w.terrain.dtype == np.float32
+    assert w.terrain.shape == w.food.shape
     assert w.alive_count == cfg.initial_creatures
     assert w.alive_count + w.free_count == n
 
@@ -168,10 +170,45 @@ def test_food_field_deterministic() -> None:
     assert not np.array_equal(a.food_field, c.food_field)
 
 
+def test_terrain_off_is_uniform() -> None:
+    """Amplitude 0 = pre-stage-10 world: flat fertility, no water."""
+    w = World(make_config(terrain_amplitude=0.0), seed=3)
+    assert np.all(w.terrain == 1.0)
+    assert w.terrain.dtype == np.float32
+
+
+def test_terrain_generation() -> None:
+    """Stage 10: amplitude = land share; water is exact 0.0, land in (0,1]."""
+    cfg = make_config()
+    w = World(cfg, seed=3)
+    t = w.terrain
+    assert t.shape == w.food.shape and t.dtype == np.float32
+    water = t == 0.0
+    assert water.any()  # default amplitude ~15% water
+    frac = float(water.mean())
+    assert 0.01 < frac < 0.45
+    land = t[~water]
+    assert land.min() > 0.0 and land.max() <= 1.0
+
+    # deterministic per seed, varies across seeds
+    a = World(make_config(), seed=3)
+    b = World(make_config(), seed=3)
+    c = World(make_config(), seed=10)
+    assert np.array_equal(a.terrain, b.terrain)
+    assert not np.array_equal(a.terrain, c.terrain)
+
+    # spawn happens before the terrain draw: positions are identical with
+    # terrain on and off (the terrain must not shift the spawn stream)
+    off = World(make_config(terrain_amplitude=0.0), seed=3)
+    on = World(make_config(), seed=3)
+    assert np.array_equal(off.pos, on.pos)
+
+
 def test_patches_persist_under_growth() -> None:
-    """Food still follows the terrain after hundreds of ticks (no flattening)."""
+    """Food still follows its growth target after hundreds of ticks (no flattening)."""
     w = World(make_config(), seed=5)
     for _ in range(300):
         advance(w)
-    corr = np.corrcoef(w.food.ravel(), w.food_field.ravel())[0, 1]
+    target = w.food_field * w.terrain  # stage 10: patches x fertility
+    corr = np.corrcoef(w.food.ravel(), target.ravel())[0, 1]
     assert corr > 0.7

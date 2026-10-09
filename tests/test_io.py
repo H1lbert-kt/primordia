@@ -22,7 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 STATE_ARRAYS = (
     "pos", "vel", "angle", "energy", "age", "genome", "species_id",
     "parent_id", "creature_id", "alive", "free_list", "food", "food_field",
-    "hidden_prev",
+    "terrain", "hidden_prev",
 )
 COUNTERS = (
     "tick", "births", "deaths_famine", "deaths_age", "deaths_predation",
@@ -79,6 +79,13 @@ def test_continuation_identical(tmp_path: Path) -> None:
         move_cost=0.0,
         turn_cost=0.0,
         food_growth_rate=0.2,
+        # fast cycles (stage 10): the save lands mid-day/mid-season, so a
+        # restored world must resume with the exact same light and season
+        # phase — they derive from the saved tick, never from stored state
+        day_period=7,
+        day_amp=1.0,
+        season_period=13,
+        season_amp=1.0,
     )
     a = World(cfg, seed=42)
     for _ in range(120):
@@ -115,6 +122,14 @@ def test_v1_save_is_rejected_clearly(tmp_path: Path) -> None:
     """Pre-stage-9 saves lack food_field; the version gate must say so."""
     path = tmp_path / "old.npz"
     np.savez(path, format_version=np.int32(1))
+    with pytest.raises(ValueError, match="format"):
+        load_world(str(path))
+
+
+def test_v2_save_is_rejected_clearly(tmp_path: Path) -> None:
+    """Pre-stage-10 saves lack terrain; the version gate must say so."""
+    path = tmp_path / "old.npz"
+    np.savez(path, format_version=np.int32(2))
     with pytest.raises(ValueError, match="format"):
         load_world(str(path))
 

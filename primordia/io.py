@@ -1,8 +1,9 @@
 """Save and load the entire world as a versioned ``.npz`` (stage 7).
 
-Format v2 stores exactly what is needed to continue a run bit-for bit
-(v2 adds the stage-9 ``food_field`` and Elman ``hidden_prev``; readers
-reject other versions, including v1, with a clear message):
+Format v3 stores exactly what is needed to continue a run bit-for bit
+(v2 added ``food_field`` and ``hidden_prev``; v3 adds ``terrain``, the
+stage-10 geography; readers reject other versions, including v1 and v2,
+with a clear message):
 
     format_version  int32 scalar; readers reject other versions
     config_json     Config as JSON (rebuilds every balance parameter)
@@ -13,9 +14,13 @@ reject other versions, including v1, with a clear message):
     free_count, next_id, genealogy_used, genealogy_overflow
                     int64 scalars
     pos vel angle energy age genome species_id parent_id creature_id
-    alive free_list food food_field hidden_prev
+    alive free_list food food_field terrain hidden_prev
                     the SoA state arrays
     genealogy       (used, 3) int32 birth log, trimmed to genealogy_used
+
+Light and season are deliberately **not** stored: they are pure functions
+of ``tick`` (see ``cycles.py``), which is saved — so a restored world
+resumes mid-cycle with the exact same phase.
 
 Deliberately **not** stored: ``sensor_buf``/``hidden_buf``/``actions``
 (rewritten by phases 3–5 of every tick — ``hidden_prev`` *is* stored: it is
@@ -42,7 +47,7 @@ from .config import Config
 from .genome import get_numba_rng_state, set_numba_rng_state
 from .world import World
 
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
 
 _INT_SCALARS = (
     "seed",
@@ -70,6 +75,7 @@ _ARRAYS = (
     "free_list",
     "food",
     "food_field",
+    "terrain",
     "hidden_prev",
 )
 
