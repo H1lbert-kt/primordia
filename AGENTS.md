@@ -14,6 +14,46 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   README principal em **inglês**.
 
 ## Estado atual do repositório (verificado em 2026-10-09)
+- **Etapa 9.5 ("o mundo precisa doer") concluída (2026-10-09):** plano em
+  `.opencode/plans/etapa-9.5-balanco-e-pressao-seletiva.md`; roadmap
+  "mundo real" aprovado em `.opencode/plans/roadmap-mundo-real.md`
+  (10 ambiente → 11 biologia → 12 ecologia → 13–16 = antiga 10–13).
+  **Diagnóstico que motivou** (baseline `4724fd0`, seed 42): mortes
+  3984 idade/104 fome/**0 predação**, pop pinada no cap, 99% acima do
+  limiar (seleção≈0), rotação ~90 rad/200 ticks (pião), sprite ~2 px.
+  **Mudanças:** (1) economia recalibrada por sweep (seeds 42/7×6000):
+  `food_capacity` 100→**3.0**, `initial_food` 60→**2.0**,
+  `food_growth_rate` 0.05→**0.02**, `eat_rate` 4→**1.0**,
+  `metabolic_cost` 0.05→**0.08** (oferta growth·K·células ≈ demanda →
+  fome regula pop); (2) física do giro: novo `Config.turn_cost` = energia
+  por radiano girado (`turn_cost*|tanh|*max_turn` debitado em
+  `apply_actions`, kernel ganhou `energy`+`turn_cost`), default **0.3**;
+  `max_turn` 0.6→**0.3**; (3) visual: `initial_zoom` 0.85→**1.5**,
+  `size_scale` 2.4→**3.0**, `max_radius_px` 6→**8** (humanoide ~4–5 px;
+  screenshot `/tmp/opencode/stage95_overview.png` — humanoids visíveis e
+  **anéis de depleção** emergindo no campo de comida). **GATE 10k ticks
+  (3 seeds):** pop mean/min 1342–1734/185–295 (abaixo do cap ✓),
+  fome **11–27%** das mortes (faixa alvo 25–40% atingida a 6k/seed-42;
+  a 10k dilui vs morte por idade — honestidade: Growth 0.015 sobe fome
+  p/ 26% mas derruba frac≈0 e min pop 185; default mantido g.02),
+  frac(E≥limiar) **0.01–0.32** (<0.5 ✓), **predação >0 nas 3 seeds**
+  (1/5/64–141), rotação **9.9–14.2** rad (6–9× menor que baseline),
+  retidão ainda 0.000 (pião mais lento, não eliminado — limitação
+  honesta, próxima alavanca = terreno/estações etapa 10).
+  **Testes: 76 passed** (3 novos: `test_turn_costs_energy`,
+  `test_turn_cost_zero_is_free`, `test_turn_cost_validation`; 6 ajustados
+  por herdar defaults — contabilizar `turn_cost` nos testes de
+  conservação, `field.std()` relativo à capacity, prefix CSR de
+  `cell_slots`, economia pinada em testes de IO/stats). **Bench**
+  (load 2–5): **989/870/321** a 500/2000/5000 — piso 30 @N=2000 com 29×
+  (tick mudou: +1 multiply no apply_actions). `STAGE8_BASE` em
+  `experiments/_common.py` agora pinza **toda** a economia da etapa 8
+  (capacity/eat/growth/metab/move/max_turn/turn_cost=0) — caches
+  intactos. `docs/demo.gif` regenerado (9000 ticks, 26 frames,
+  **3.69 MB** <4 MB). `overrides.example.json` atualizado (inclui
+  `turn_cost`). Síntese: **seleção existe agora** (fome + giro caro +
+  predação viva), mas o mundo ainda é um torus plano — etapa 10
+  (terreno/estações/luz) é o próximo degrau de realismo aprovado.
 - **Etapa 9 ("mundo que ensina") Fases A–F5 concluídas:**
   planos em `.opencode/plans/etapa-9-mundo-que-ensina.md` (+ roadmap
   10–13 do usuário). Ordem aprovada F1→F5. **F1** painel guiado:
@@ -149,12 +189,12 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   2000, `diet_mean` 0.001–0.005 (predação ainda inerte — é a pergunta do
   experimento `predation`). `pytest -q` (54) verde com o default novo.
 - Predação/dieta ativas prontas; experimentos/README/GIFs (etapa 8).
-- `pytest -q` (73 passed), `python -m primordia.bench [--profile]`,
+- `pytest -q` (76 passed), `python -m primordia.bench [--profile]`,
   `run.py --headless --ticks N [--stats out.npz] [--save w.npz]`,
   `run.py --load w.npz --headless --ticks N`,
   `python plot.py out.npz --out figs/`, `run.py --seed 42` (janela),
   `run.py --config overrides.json` e
-  `run.py --headless --ticks 9000 --record docs --record-every 320`
+  `run.py --headless --ticks 9000 --record docs --record-every 360`
   (frames + GIF demo) funcionam. Plot da árvore genealógica
   ficou fora do catálogo aprovado da etapa 8 (lineage usa o log com
   métricas agregadas).
@@ -434,5 +474,11 @@ antes de dizer que uma mudança de tick não regrediu desempenho.
 6. Estatísticas e gráficos
 7. Salvar/carregar e árvore genealógica
 8. Experimentos, GIFs, README e publicação
+9. "Mundo que ensina" (patches, sentidos ricos, Elman, viewer) ✓
+9.5. Balanço e pressão seletiva (economia, turn_cost, zoom) ✓
+
+Roadmap "mundo real" aprovado (`.opencode/plans/roadmap-mundo-real.md`):
+10 ambiente (terreno/estações/luz) → 11 biologia (sexualidade/doença)
+→ 12 ecologia (ciclos tróficos) → 13–16 civilização+ (antiga 10–13).
 
 Trabalhe **apenas na etapa que o usuário indicar**.

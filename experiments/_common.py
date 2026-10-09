@@ -35,7 +35,21 @@ DPI = 120
 # Config defaults of stage 8, pinned so cached runs and README numbers stay
 # reproducible after later stages change Config defaults. Merge order in the
 # experiment scripts: asdict(Config()) | STAGE8_BASE | variant overrides.
-STAGE8_BASE = {"food_patch_amplitude": 0.0}  # stage 8 ran on a uniform field
+# Stage 9.5 changed the economy (food_capacity 100->3, eat_rate 4->1, ...);
+# pin the whole stage-8 regime, not just the patch knob, so --force reruns
+# stay in the documented regime (exact bit-reproduction still needs the
+# stage-8 commit: brains gained recurrence in stage 9).
+STAGE8_BASE = {
+    "food_patch_amplitude": 0.0,  # stage 8 ran on a uniform field
+    "food_capacity": 100.0,
+    "food_growth_rate": 0.05,
+    "initial_food": 60.0,
+    "eat_rate": 4.0,
+    "metabolic_cost": 0.05,
+    "move_cost": 0.05,
+    "max_turn": 0.6,
+    "turn_cost": 0.0,  # did not exist in stage 8: free steering
+}
 
 
 def run_variant(

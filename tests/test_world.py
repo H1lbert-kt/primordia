@@ -89,6 +89,7 @@ def test_energy_conservation_without_growth_or_deaths() -> None:
         metabolic_cost=0.1,
         food_growth_rate=0.0,  # food then only transfers to creatures
         move_cost=0.0,  # isolate the food <-> energy accounting from balance
+        turn_cost=0.0,
     )
     w = World(cfg, seed=7)
     food0 = float(w.food.sum(dtype=np.float64))
@@ -152,7 +153,8 @@ def test_food_field_patches() -> None:
     w = World(cfg, seed=3)
     field = w.food_field
     assert field.shape == w.food.shape and field.dtype == np.float32
-    assert field.std() > 1.0  # real patches, not a flat field
+    # relative check: patches must stand out against the (small) capacity
+    assert field.std() > 0.05 * cfg.food_capacity  # real patches, not flat
     lo = cfg.food_capacity * (1.0 - cfg.food_patch_amplitude)
     assert field.min() >= lo - 1e-3
     assert field.max() <= cfg.food_capacity + 1e-3

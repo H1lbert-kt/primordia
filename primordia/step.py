@@ -12,7 +12,8 @@ profiler in ``bench``):
        metabolic_cost plus move_cost * |vel|^2)
     3. perceive         (parallel: rays + smell + internal -> sensor_buf)
     4. think            (parallel: MLP forward -> hidden_buf, raw actions)
-    5. apply actions    (parallel: accel/turn -> vel/angle, eat gate)
+    5. apply actions    (parallel: accel/turn -> vel/angle, eat gate; turning
+        drains turn_cost * |radians| — steering is never free)
     6. eat              (serial: shared cells; extraction * gate)
     7. bite             (serial: contact predation; gate * diet budget, energy
        transfer at bite_efficiency, prey at 0 energy is killed here and
@@ -239,9 +240,11 @@ def phase_apply_actions(world: World) -> None:
         world.actions,
         world.angle,
         world.vel,
+        world.energy,
         world.alive,
         world.genome,
         np.float32(cfg.max_turn),
+        np.float32(cfg.turn_cost),
         np.int32(cfg.brain_params),
     )
 

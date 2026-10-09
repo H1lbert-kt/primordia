@@ -20,7 +20,9 @@ class Settings:
 
     min_zoom: float = 0.1  # pixels per world unit
     max_zoom: float = 10.0
-    initial_zoom: float = 0.85
+    # Stage 9.5: default zoom + size_scale give a size-1 creature a ~4px
+    # humanoid (was ~2px = unreadable dot that only "spun").
+    initial_zoom: float = 1.5
     pick_radius_px: float = 14.0  # click tolerance when selecting
     pan_drag_px: float = 4.0  # movement before a drag counts as pan
 
@@ -47,8 +49,8 @@ class Settings:
     food_gamma: float = 0.75  # <1 lifts midtones: patches read against depletion
 
     # creature scatter: pixel radius = clamp(round(size * zoom * size_scale), 1, max)
-    size_scale: float = 2.4
-    max_radius_px: int = 6
+    size_scale: float = 3.0
+    max_radius_px: int = 8
     sprite_buckets: int = 16  # heading pre-rendered as N/S/E/W x diagonals
 
     # selected-creature trail (world coords, app-side ring buffer)

@@ -46,10 +46,12 @@ limitations in each experiment's README.
 
 > **Reproducibility note.** The tables and figures below were produced on the
 > pre-stage-9 tree (19-input, 12-hidden feedforward brains, uniform food
-> field). Stage 9 changed the brain layout (28 inputs, 10 hidden units,
-> Elman recurrence). The scripts reproduce the *protocol* on current HEAD —
-> trajectories land on different numbers; the original runs stay in each
-> experiment's gitignored `data/` cache.
+> field, the old food economy). Stage 9 changed the brain layout (28 inputs,
+> 10 hidden units, Elman recurrence) and stage 9.5 recalibrated the economy
+> (the experiment scripts pin the stage-8 values via `STAGE8_BASE` so the
+> *regime* is preserved). The scripts reproduce the *protocol* on current
+> HEAD — trajectories land on different numbers; the original runs stay in
+> each experiment's gitignored `data/` cache.
 
 ### 1. Energy grows without a ceiling — and the obvious knobs don't fix it
 
@@ -67,6 +69,14 @@ turnover frees slots, reproduction and mutation keep running all run long,
 and mean energy settles into a bounded ~1000–4000 cycle instead of growing
 without limit (~4400 age deaths and births per run instead of one cliff at
 the final tick).
+
+**Stage 9.5 follow-up:** the missing knob was the *scale* of the food
+economy, not its slope — `food_capacity` 100 → 3, `eat_rate` 4 → 1,
+`food_growth_rate` 0.05 → 0.02, `metabolic_cost` 0.05 → 0.08. Offer now
+matches demand: over 10k ticks the population sits at mean 1342–1734 with
+minima of 185–295 (below the 2000 cap), famine is the second death cause
+(11–27% of deaths), and only 1–32% of survivors sit above the reproduction
+threshold at any time. Selection finally has something to act on.
 
 ### 2. Mutation controls spread, not direction
 
@@ -87,6 +97,12 @@ old-age deaths. The likely trap: bite budget is `bite_rate × diet`, so near
 diet ≈ 0 meat cannot pay for itself, and diet cannot grow without meat
 paying. Publishing this as-is — an honest negative beats a cherry-picked
 gif.
+
+*Stage 9.5 update:* with the scarcer economy (and a steak now worth more
+relative to a shrinking energy budget), predation first went nonzero: every
+one of 3 seeds × 10k ticks records predation deaths (1–64 per run), and the
+top 1% of evolved diets reach 0.17–0.22. Still a trickle, not a food web —
+the trophic-cascade stage (12) is where this gets a real test.
 
 ![diet](experiments/predation/figs/diet.png)
 
@@ -112,15 +128,17 @@ cause, and mean energy live (sparkline in overview mode).
 
 Target: ≥ 30 ticks/s at 2000 creatures headless (i5-8265U, no GPU).
 
-| creatures | ticks/s (load 2–3, two runs) |
+| creatures | ticks/s (load 2–5, stage 9.5 economy) |
 |---|---|
-| 500 | 269–335 |
-| 2000 | 116–121 |
-| 5000 | 62–80 |
+| 500 | 989 |
+| 2000 | 870 |
+| 5000 | 321 |
 
 Numbers vary 2–4× between processes depending on machine load (this box runs
-a desktop session); compare A/B in the same session. `python -m
-primordia.bench [--profile]` reproduces the table.
+a desktop session); compare A/B in the same session. The stage-9.5 economy
+keeps populations below the cap during a 1000-tick bench (alive_final
+296/1087/1335), so these are not directly comparable to earlier tables.
+`python -m primordia.bench [--profile]` reproduces the table.
 
 ## Reproduce everything
 
@@ -141,7 +159,7 @@ python run.py --load w5k.npz --headless --ticks 500
 
 # demo GIF (what you see at the top of this README)
 python run.py --seed 42 --headless --ticks 9000 \
-    --record docs --record-every 320
+    --record docs --record-every 360
 
 # JSON config overrides (copy overrides.example.json and edit fields;
 # unknown field names are rejected loudly)
@@ -155,7 +173,7 @@ primordia/
   config.py   world.py   genome.py   brain.py   sensors.py
   step.py     stats.py   io.py       bench.py
   render/     # pygame viewer + headless GIF recorder (never imported by core)
-tests/        # 73 tests: determinism, invariants, save/load, guards
+tests/        # 76 tests: determinism, invariants, save/load, guards
 experiments/  # one script + README per experiment
 run.py        # CLI: --seed --headless --ticks --load --save --stats
               #      --config --record --screenshot --select
@@ -163,12 +181,15 @@ run.py        # CLI: --seed --headless --ticks --load --save --stats
 
 ## Roadmap status
 
-Stages 1–9 of the plan are implemented: world+food, brain+sensors,
+Stages 1–9.5 of the plan are implemented: world+food, brain+sensors,
 genome+reproduction, viewer, evolvable predation, stats/plots,
-save/load+genealogy, this experiments/demo/publication stage, and the
-guided-world stage (persistent food patches, richer senses, Elman
-recurrence, a richer viewer). Known open problems are documented above
-(predation emergence, energy regime) rather than hidden.
+save/load+genealogy, experiments/demo/publication, the guided-world stage
+(persistent food patches, richer senses, Elman recurrence, a richer
+viewer), and the balance stage (food economy recalibrated, turning now
+costs energy, larger sprites). The "real world" roadmap continues with
+stage 10 (terrain/seasons/light), 11 (biology), 12 (ecology), 13–16
+(civilization+). Known open problems are documented above (predation still
+a trickle, creatures still circle) rather than hidden.
 
 ## License
 

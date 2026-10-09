@@ -81,10 +81,11 @@ def test_deltas_match_cumulative_counters() -> None:
 
 
 def test_trait_diversity_zero_then_positive() -> None:
-    # mutation_rate 0.5 + a low threshold forces births (and therefore
-    # mutations) quickly: clones only diverge when children are created.
+    # mutation_rate 0.5 + a threshold below spawn energy forces births (and
+    # therefore mutations) on the first tick: clones only diverge when
+    # children are created, whatever the foraging economy does.
     cfg = Config(max_creatures=64, initial_creatures=32,
-                 reproduce_threshold=51.0, mutation_rate=0.5)
+                 reproduce_threshold=45.0, mutation_rate=0.5)
     w = World(cfg, seed=5)
     rec = StatsRecorder(capacity=8, sample_every=1, sample_size=16)
 

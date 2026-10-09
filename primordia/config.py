@@ -33,13 +33,17 @@ class Config:
     max_age: int = 2000  # ticks; death when age >= max_age
 
     # --- metabolism ---
-    metabolic_cost: float = 0.05  # energy drained per tick while alive
+    metabolic_cost: float = 0.08  # energy drained per tick while alive
 
     # --- food (energy per grid cell) ---
-    food_capacity: float = 100.0  # max energy stored in one cell
-    food_growth_rate: float = 0.05  # fraction of the deficit refilled per tick
-    initial_food: float = 60.0  # energy per cell at t=0
-    eat_rate: float = 4.0  # max energy a creature extracts per tick
+    # Stage 9.5 calibration (seeds 42/7 x 6000 ticks): supply
+    # growth*K*cells ~= demand lets famine regulate the population below
+    # the cap instead of saturating it. energy per cell is small on purpose:
+    # a cell is a meal, not a bank.
+    food_capacity: float = 3.0  # max energy stored in one cell
+    food_growth_rate: float = 0.02  # fraction of the deficit refilled per tick
+    initial_food: float = 2.0  # energy per cell at t=0
+    eat_rate: float = 1.0  # max energy a creature extracts per tick
 
     # --- food patches (stage 9: persistent foraging landscape) ---
     # Local carrying capacity K per cell: value noise in
@@ -64,7 +68,7 @@ class Config:
 
     # --- locomotion (cinematic: vel = dir(angle) * max_speed * accel) ---
     max_speed: float = 4.0  # default genome trait: world units per tick
-    max_turn: float = 0.6  # radians per tick at |turn| = 1
+    max_turn: float = 0.3  # radians per tick at |turn| = 1 (inertia)
 
     # --- reproduction and mutation (stage 3) ---
     reproduce_threshold: float = 100.0  # energy needed to split in two
@@ -78,6 +82,10 @@ class Config:
 
     # --- movement cost ---
     move_cost: float = 0.05  # energy per tick at speed 1 (quadratic in |vel|)
+    # Steering is not free (stage 9.5): energy drained per radian actually
+    # turned, i.e. turn_cost * |turn| * max_turn. Same physical-law framing
+    # as move_cost — perpetual spinning starves.
+    turn_cost: float = 0.3
 
     # --- predation (stage 5): capability comes from the diet trait ---
     bite_rate: float = 4.0  # max energy an attacker drains per tick (budget)
@@ -126,6 +134,8 @@ class Config:
             raise ValueError("mutation_std and trait_mutation_std must be >= 0")
         if self.move_cost < 0.0:
             raise ValueError("move_cost must be >= 0")
+        if self.turn_cost < 0.0:
+            raise ValueError("turn_cost must be >= 0")
         if self.bite_rate < 0.0:
             raise ValueError("bite_rate must be >= 0")
         if not 0.0 <= self.bite_efficiency <= 1.0:

@@ -55,6 +55,15 @@ def test_food_patch_fields_validation() -> None:
         Config(food_patch_scale=0.0)
 
 
+def test_turn_cost_validation() -> None:
+    """Stage 9.5 steering cost: >= 0, default > 0, max_turn still bounded."""
+    Config(turn_cost=0.0)  # free turning stays available for experiments
+    assert Config().turn_cost > 0.0
+    assert Config().max_turn == 0.3
+    with pytest.raises(ValueError, match="turn_cost"):
+        Config(turn_cost=-0.01)
+
+
 def test_unknown_field_fails_loudly(tmp_path: Path) -> None:
     path = write_json(tmp_path / "bad.json", {"food_growht_rate": 0.01})
     with pytest.raises(ValueError, match="unknown Config fields"):

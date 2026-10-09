@@ -13,8 +13,10 @@ Genome layout per creature (float32 row, offsets derived from ``Config``):
 tick's hidden state (``hidden_prev``) through ``W_rec``, then the new state
 is committed back — short-term memory without any new randomness.
 ``think`` stores raw output logits in ``actions``; ``apply_actions`` maps them
-to motion (cinematic: vel = dir(angle) * max_speed * accel) and converts the
-eat logit into a gate in ``(0, 1)`` that ``step`` applies when foraging.
+to motion (cinematic: vel = dir(angle) * max_speed * accel), converts the
+eat logit into a gate in ``(0, 1)`` that ``step`` applies when foraging, and
+drains ``turn_cost`` energy per radian turned (steering is a physical cost,
+stage 9.5).
 No random numbers are drawn in this module.
 """
 
@@ -74,12 +76,19 @@ def apply_actions(
     actions: np.ndarray,
     angle: np.ndarray,
     vel: np.ndarray,
+    energy: np.ndarray,
     alive: np.ndarray,
     genome: np.ndarray,
     max_turn: np.float32,
+    turn_cost: np.float32,
     traits_off: np.int32,
 ) -> None:
-    """Map logits to steering: angle += turn, vel = dir * speed, gate = sigmoid."""
+    """Map logits to steering: angle += turn, vel = dir * speed, gate = sigmoid.
+
+    Turning drains ``turn_cost * |turn| * max_turn`` energy (radians actually
+    rotated), so perpetual spinning starves — a physical law, never a fitness
+    term (stage 9.5).
+    """
     tau = np.float32(2.0 * np.pi)
     for i in prange(alive.size):
         if not alive[i]:
@@ -95,6 +104,7 @@ def apply_actions(
         while a < 0.0:
             a = a + tau
         angle[i] = a
+        energy[i] = energy[i] - turn_cost * abs(turn) * max_turn
 
         speed = accel * genome[i, traits_off]
         c = np.cos(a)

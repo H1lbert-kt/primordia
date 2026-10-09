@@ -146,6 +146,7 @@ def test_energy_conserved_with_births() -> None:
         reproduce_threshold=40.0,
         metabolic_cost=0.0,
         move_cost=0.0,
+        turn_cost=0.0,  # isolate the food <-> energy accounting from steering
         food_growth_rate=0.0,  # food only transfers to creatures
     )
     w = World(cfg, seed=4)

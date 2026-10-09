@@ -2,5 +2,6 @@
   "initial_creatures": 800,
   "max_age": 1500,
   "n_rays": 9,
-  "food_growth_rate": 0.03
+  "food_growth_rate": 0.03,
+  "turn_cost": 0.45
 }

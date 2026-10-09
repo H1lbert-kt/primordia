@@ -58,8 +58,13 @@ def test_roundtrip_immediate(tmp_path: Path) -> None:
     # cell grids are valid right after load (rebuild ran), not garbage from
     # the freshly constructed world
     w.rebuild_counts()
-    for name in ("cell_counts", "cell_diet", "cell_offsets", "cell_slots"):
+    for name in ("cell_counts", "cell_diet", "cell_offsets"):
         assert np.array_equal(getattr(w, name), getattr(v, name)), name
+    # cell_slots is scratch (not saved): only the CSR prefix up to the live
+    # count is meaningful, and the rebuild wrote exactly that prefix
+    used = int(w.cell_offsets[-1])
+    assert used == int(v.cell_offsets[-1])
+    assert np.array_equal(w.cell_slots[:used], v.cell_slots[:used]), "cell_slots"
 
 
 def test_continuation_identical(tmp_path: Path) -> None:
@@ -69,7 +74,12 @@ def test_continuation_identical(tmp_path: Path) -> None:
         initial_creatures=32,
         reproduce_threshold=60.0,
         max_age=140,  # the spawn generation dies inside the continuation window,
-    )                 # freeing slots so births (and RNG draws) keep happening
+        # generous economy: this test pins the IO/RNG stream, not the balance
+        metabolic_cost=0.0,
+        move_cost=0.0,
+        turn_cost=0.0,
+        food_growth_rate=0.2,
+    )
     a = World(cfg, seed=42)
     for _ in range(120):
         advance(a)

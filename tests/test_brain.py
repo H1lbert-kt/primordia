@@ -125,6 +125,40 @@ def test_outputs_drive_motion() -> None:
     assert 0.0 < w.actions[slot, 2] < 1.0
 
 
+def test_turn_costs_energy() -> None:
+    """Stage 9.5: energy drain is turn_cost * |tanh(turn logit)| * max_turn."""
+    cfg = Config(max_creatures=4, initial_creatures=1)
+    w = World(cfg, seed=2)
+    slot = first_alive(w)
+    _w1, _b1, _w2, b2, _wrec = offsets(cfg)
+
+    w.genome[slot] = 0.0
+    w.genome[slot, cfg.brain_params] = cfg.max_speed
+    w.genome[slot, b2 + 1] = 9.0  # turn logit -> tanh ~= 1; accel/gate stay 0
+    e0 = float(w.energy[slot])
+
+    step.phase_think(w)
+    step.phase_apply_actions(w)
+
+    drain = cfg.turn_cost * float(np.tanh(9.0)) * cfg.max_turn
+    assert float(w.energy[slot]) == pytest.approx(e0 - drain, abs=1e-3)
+    assert abs(float(w.angle[slot])) > 0.25  # it did turn
+
+
+def test_turn_cost_zero_is_free() -> None:
+    cfg = Config(max_creatures=4, initial_creatures=1, turn_cost=0.0)
+    w = World(cfg, seed=2)
+    slot = first_alive(w)
+    _w1, _b1, _w2, b2, _wrec = offsets(cfg)
+    w.genome[slot] = 0.0
+    w.genome[slot, cfg.brain_params] = cfg.max_speed
+    w.genome[slot, b2 + 1] = 9.0
+    e0 = float(w.energy[slot])
+    step.phase_think(w)
+    step.phase_apply_actions(w)
+    assert float(w.energy[slot]) == pytest.approx(e0, abs=1e-4)
+
+
 def test_eat_gate() -> None:
     cfg = Config(max_creatures=4, initial_creatures=1, food_growth_rate=0.0)
     _w1, _b1, _w2, b2, _wrec = offsets(cfg)
