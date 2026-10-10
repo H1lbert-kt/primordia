@@ -10,6 +10,7 @@ never resized. Array dtypes are part of the module contract:
     alive (N,) bool, free_list (N,) int32, food (H,W) float32,
     food_field (H,W) float32 (local capacity K, stage 9 patches),
     terrain (H,W) float32 (fertility in [0,1], exact 0.0 = water, stage 10),
+    meat (H,W) float32 (carrion energy per cell, stage 11),
     cell_counts (H,W) int32,
     cell_diet (H,W) float32, cell_offsets (H*W+1,) int32,
     cell_slots (N,) int32, cell_cursor (H*W,) int32 scratch,
@@ -145,6 +146,7 @@ class World:
         self.cell_w = np.float32(config.width / gw)
         self.cell_h = np.float32(config.height / gh)
         self.food = np.full((gh, gw), config.initial_food, dtype=np.float32)
+        self.meat = np.zeros((gh, gw), dtype=np.float32)
         self.cell_counts = np.zeros((gh, gw), dtype=np.int32)
         self.cell_diet = np.zeros((gh, gw), dtype=np.float32)
         n_cells = gh * gw
@@ -171,6 +173,8 @@ class World:
         self.deaths_famine = 0
         self.deaths_age = 0
         self.deaths_predation = 0
+        # Total energy ever extracted from carrion (stage 11 gate metric).
+        self.meat_eaten = 0.0
 
         # Genealogy (stage 7): birth-id allocator plus the pre-allocated
         # birth log; _reproduce writes rows through the cursor in-place.

@@ -85,7 +85,8 @@ def test_trait_diversity_zero_then_positive() -> None:
     # therefore mutations) on the first tick: clones only diverge when
     # children are created, whatever the foraging economy does.
     cfg = Config(max_creatures=64, initial_creatures=32,
-                 reproduce_threshold=45.0, mutation_rate=0.5)
+                 reproduce_threshold=45.0, mutation_rate=0.5,
+                 mate_range=1e6)  # dense mating: pins diversity, not ecology
     w = World(cfg, seed=5)
     rec = StatsRecorder(capacity=8, sample_every=1, sample_size=16)
 

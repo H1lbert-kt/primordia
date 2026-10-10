@@ -39,7 +39,10 @@ DPI = 120
 # stage 10 added terrain, day/night and seasons (off here) — pin the whole
 # old regime, not just one knob, so --force reruns stay documented (exact
 # bit-reproduction still needs the stage-8 commit: brains gained recurrence
-# in stage 9).
+# in stage 9). Stage 11 switched reproduction to sexual, added senescence
+# and carrion — reruns on HEAD use the sexual dynamics (mate/senescence/
+# carrion knobs are NOT pinned off here: sex is the new default, and the
+# asexual regime only exists in the pre-stage-11 commits).
 STAGE8_BASE = {
     "food_patch_amplitude": 0.0,  # stage 8 ran on a uniform field
     "food_capacity": 100.0,

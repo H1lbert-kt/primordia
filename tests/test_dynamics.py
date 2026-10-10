@@ -38,6 +38,7 @@ def test_birth_flash_is_green(ready) -> None:
         initial_creatures=4,
         reproduce_threshold=10.0,
         max_age=10_000,
+        mate_range=1e6,  # every initiator finds a partner; this pins flashes
     )
     w = World(cfg, seed=5)
     settings = _settings()

@@ -30,7 +30,10 @@ class Config:
     max_creatures: int = 2000  # fixed array capacity (SoA allocation)
     initial_creatures: int = 500
     initial_energy: float = 50.0
-    max_age: int = 2000  # ticks; death when age >= max_age
+    # Stage 11: senescence (wear exp(senescence_rate * age)) is the real
+    # limit on lifespan now; max_age stays as a high safety ceiling so the
+    # death-age histogram reflects wear/famine, not this cliff.
+    max_age: int = 5000  # ticks; death when age >= max_age
 
     # --- metabolism ---
     metabolic_cost: float = 0.08  # energy drained per tick while alive
@@ -92,7 +95,7 @@ class Config:
     smell_radius_cells: int = 1  # (2r+1)^2 cells sensed around the creature
 
     # --- brain ---
-    # 10 keeps brain_params at 433 (with the 29 inputs + W_rec), inside the
+    # 10 keeps brain_params at 443 (with the 30 inputs + W_rec), inside the
     # 100-500 parameter budget; 12 would push it well beyond.
     hidden_size: int = 10
     weight_init_std: float = 0.5  # std of N(0, std) weights drawn at spawn
@@ -107,6 +110,20 @@ class Config:
     mutation_rate: float = 0.01  # probability per gene of being mutated
     mutation_std: float = 0.05  # additive std for brain genes
     trait_mutation_std: float = 0.10  # relative std for multiplicative traits
+
+    # --- sex and senescence (stage 11: real diversity, disposable soma) ---
+    # Reproduction is sexual: an initiator above the threshold needs a
+    # partner alive within mate_range (world units); each parent pays half
+    # of the child's energy and the child's genome is a per-gene uniform
+    # crossover plus mutation. No partner -> no birth: mobility and
+    # aggregation get selected without being programmed.
+    mate_range: float = 3.0
+    # Wear factor w = exp(senescence_rate * age), applied at *use*, never
+    # inherited: effective speed and vision shrink by 1/w while the
+    # metabolic bill grows by w. 0 = no senescence (stage-10 behavior).
+    # Fase-E sweep (seeds 42/7, 6000 ticks): 0.002 -> extinction, 0.001 ->
+    # collapse to ~73-126 alive, 0.0005 -> stable 277-417 with predation.
+    senescence_rate: float = 0.0005
 
     # --- genealogy (stage 7): pre-allocated birth log buffer ---
     genealogy_capacity: int = 100_000  # rows of (tick, child_id, parent_id); 0 = off
@@ -123,6 +140,15 @@ class Config:
     bite_efficiency: float = 0.7  # share of drained energy kept (rest dissipates)
     contact_range: float = 1.5  # contact = this * (size_a + size_v), world units
     max_size: float = 4.0  # clamp on the size trait (spawn starts at 1.0)
+
+    # --- carrion (stage 11: nutrients return to the ground) ---
+    # Death deposits meat on its cell: predation converts the bite share
+    # that would dissipate as heat (yield * (1 - bite_efficiency) * take),
+    # old age deposits the leftover body energy (yield * max(energy, 0)),
+    # famine deposits ~0 (a starved body has nothing to leave). Eaters
+    # drain food first, then meat; meat decays by meat_decay per tick.
+    carrion_yield: float = 0.3
+    meat_decay: float = 0.02
 
     def __post_init__(self) -> None:
         if self.width <= 0.0 or self.height <= 0.0:
@@ -187,6 +213,14 @@ class Config:
             raise ValueError("contact_range must be positive")
         if self.max_size < 1.0:
             raise ValueError("max_size must be >= 1.0 (spawn initializes size=1.0)")
+        if self.mate_range <= 0.0:
+            raise ValueError("mate_range must be positive")
+        if self.senescence_rate < 0.0:
+            raise ValueError("senescence_rate must be >= 0")
+        if not 0.0 <= self.carrion_yield <= 1.0:
+            raise ValueError("carrion_yield must be in [0, 1]")
+        if not 0.0 <= self.meat_decay < 1.0:
+            raise ValueError("meat_decay must be in [0, 1)")
         if self.genealogy_capacity < 0:
             raise ValueError("genealogy_capacity must be >= 0")
 
@@ -200,10 +234,11 @@ class Config:
 
     @property
     def sensor_input_dim(self) -> int:
-        """Inputs: 3 ray channels (food sum, creatures, food peak), 3 smells,
-        2 food antennas (left/right of heading) and 3 internal sensors
-        (energy, speed, ambient light — stage 10's circadian cue)."""
-        return self.n_rays * 3 + 8
+        """Inputs: 3 ray channels (food sum, creatures, food peak), 4 smells
+        (food, creatures, prey-diet, carrion — stage 11), 2 food antennas
+        (left/right of heading) and 3 internal sensors (energy, speed,
+        ambient light — stage 10's circadian cue)."""
+        return self.n_rays * 3 + 9
 
     @property
     def brain_params(self) -> int:

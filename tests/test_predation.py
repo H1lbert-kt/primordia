@@ -40,6 +40,10 @@ def test_transfer_and_conservation() -> None:
     assert np.isclose(w.energy[a], 10.0 + 0.7 * 4.0, rtol=1e-4)
     # global loss equals the dissipated share only (no energy created)
     assert np.isclose(w.energy[a] + w.energy[v], 60.0 - 0.3 * 4.0, rtol=1e-4)
+    # stage 11: the carrion share lands as meat on the victim's cell
+    ix = int(w.pos[v, 0] / w.cell_w)
+    iy = int(w.pos[v, 1] / w.cell_h)
+    assert np.isclose(w.meat[iy, ix], 0.3 * 0.3 * 4.0, rtol=1e-4)
     assert w.deaths_predation == 0
 
 
@@ -158,21 +162,22 @@ def test_csr_grid_consistent() -> None:
     assert np.allclose(w.cell_diet, diet_sums, rtol=1e-6)
 
 
-def test_meat_smell_sensor() -> None:
+def test_preysmell_sensor() -> None:
+    """The diet channel smells nearby prey (other creatures' diet traits)."""
     cfg = Config(max_creatures=8, initial_creatures=2)
     w = World(cfg, seed=0)
     me, prey = np.flatnonzero(w.alive)
-    meat_idx = 3 * cfg.n_rays + 2  # third smell channel (layout in sensors.py)
+    prey_idx = 3 * cfg.n_rays + 2  # third smell channel (layout in sensors.py)
     _place(w, me, 500.0, 500.0, 30.0, diet=0.0)
     _place(w, prey, 507.0, 500.0, 30.0, diet=1.0)  # adjacent smell cell
     step.phase_rebuild_counts(w)
     step.phase_perceive(w)
-    assert w.sensor_buf[me, meat_idx] > 0.0  # I smell the prey's diet
-    assert w.sensor_buf[prey, meat_idx] >= 0.0
+    assert w.sensor_buf[me, prey_idx] > 0.0  # I smell the prey's diet
+    assert w.sensor_buf[prey, prey_idx] >= 0.0
 
-    # a lone creature never smells its own meat (self excluded)
+    # a lone creature never smells its own diet (self excluded)
     _place(w, prey, 800.0, 800.0, 30.0, diet=1.0)
     _place(w, me, 200.0, 200.0, 30.0, diet=1.0)
     step.phase_rebuild_counts(w)
     step.phase_perceive(w)
-    assert w.sensor_buf[me, meat_idx] == 0.0
+    assert w.sensor_buf[me, prey_idx] == 0.0

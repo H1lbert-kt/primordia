@@ -234,7 +234,7 @@ def render_panel(
                     y - 1,
                     settings.text_dim,
                 )
-                y += 12
+                y += 10  # stage 11: 8 single-sensor rows must fit the 720px panel
         y += 4
 
         # brain: hidden activations and raw outputs
@@ -326,9 +326,10 @@ def render_panel(
     y = _text(dst, 20, "WORLD", x, y, settings.text)
     alive = world.alive_count
     mean_e = float(world.energy[world.alive].mean()) if alive else 0.0
+    meat_total = float(world.meat.sum(dtype=np.float64))
     stats = (
         f"tick {world.tick}   alive {alive}/{world.config.max_creatures}",
-        f"mean energy {mean_e:.1f}",
+        f"mean energy {mean_e:.1f}   meat {meat_total:.0f}",
         f"births {world.births}   famine {world.deaths_famine}",
         f"age deaths {world.deaths_age}   predation {world.deaths_predation}",
         f"fps {hud.fps:.0f}   sim x{hud.speed}{'  [PAUSED]' if hud.paused else ''}"

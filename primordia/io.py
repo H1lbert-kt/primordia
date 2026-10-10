@@ -1,9 +1,9 @@
 """Save and load the entire world as a versioned ``.npz`` (stage 7).
 
-Format v3 stores exactly what is needed to continue a run bit-for bit
+Format v4 stores exactly what is needed to continue a run bit-for bit
 (v2 added ``food_field`` and ``hidden_prev``; v3 adds ``terrain``, the
-stage-10 geography; readers reject other versions, including v1 and v2,
-with a clear message):
+stage-10 geography; v4 adds ``meat`` and ``meat_eaten``, the stage-11
+carrion cycle; readers reject older versions with a clear message):
 
     format_version  int32 scalar; readers reject other versions
     config_json     Config as JSON (rebuilds every balance parameter)
@@ -13,8 +13,9 @@ with a clear message):
     tick, births, deaths_famine, deaths_age, deaths_predation,
     free_count, next_id, genealogy_used, genealogy_overflow
                     int64 scalars
+    meat_eaten      float64 scalar (cumulative carrion energy extracted)
     pos vel angle energy age genome species_id parent_id creature_id
-    alive free_list food food_field terrain hidden_prev
+    alive free_list food food_field terrain meat hidden_prev
                     the SoA state arrays
     genealogy       (used, 3) int32 birth log, trimmed to genealogy_used
 
@@ -47,7 +48,7 @@ from .config import Config
 from .genome import get_numba_rng_state, set_numba_rng_state
 from .world import World
 
-FORMAT_VERSION = 3
+FORMAT_VERSION = 4
 
 _INT_SCALARS = (
     "seed",
@@ -61,6 +62,7 @@ _INT_SCALARS = (
     "genealogy_used",
     "genealogy_overflow",
 )
+_FLOAT_SCALARS = ("meat_eaten",)
 _ARRAYS = (
     "pos",
     "vel",
@@ -76,12 +78,13 @@ _ARRAYS = (
     "food",
     "food_field",
     "terrain",
+    "meat",
     "hidden_prev",
 )
 
 
 def save_world(world: World, path: str) -> None:
-    """Write the full simulation state to ``path`` (npz, format v1)."""
+    """Write the full simulation state to ``path`` (npz, format v4)."""
     payload: dict[str, np.ndarray] = {
         "format_version": np.int32(FORMAT_VERSION),
         "config_json": np.array(json.dumps(asdict(world.config), sort_keys=True)),
@@ -96,6 +99,8 @@ def save_world(world: World, path: str) -> None:
     }
     for name in _INT_SCALARS:
         payload[name] = np.int64(getattr(world, name))
+    for name in _FLOAT_SCALARS:
+        payload[name] = np.float64(getattr(world, name))
     for name in _ARRAYS:
         payload[name] = np.asarray(getattr(world, name))
     payload["genealogy"] = world.genealogy[: world.genealogy_used].copy()
@@ -117,6 +122,7 @@ def load_world(path: str) -> World:
         cfg = Config(**json.loads(str(f["config_json"])))
         rng = json.loads(str(f["rng_json"]))
         scalars = {name: int(f[name]) for name in _INT_SCALARS}
+        scalars_f = {name: float(f[name]) for name in _FLOAT_SCALARS}
         arrays = {name: np.array(f[name]) for name in _ARRAYS}
         log = np.array(f["genealogy"])
 
@@ -127,6 +133,8 @@ def load_world(path: str) -> World:
     for name, arr in arrays.items():
         getattr(world, name)[...] = arr
     for name, value in scalars.items():
+        setattr(world, name, value)
+    for name, value in scalars_f.items():
         setattr(world, name, value)
     world.genealogy[: log.shape[0]] = log
     world.rng.bit_generator.state = rng["numpy"]

@@ -22,7 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 STATE_ARRAYS = (
     "pos", "vel", "angle", "energy", "age", "genome", "species_id",
     "parent_id", "creature_id", "alive", "free_list", "food", "food_field",
-    "terrain", "hidden_prev",
+    "terrain", "meat", "hidden_prev",
 )
 COUNTERS = (
     "tick", "births", "deaths_famine", "deaths_age", "deaths_predation",
@@ -35,6 +35,7 @@ def assert_worlds_equal(a: World, b: World) -> None:
         assert np.array_equal(getattr(a, name), getattr(b, name)), name
     for name in COUNTERS:
         assert getattr(a, name) == getattr(b, name), name
+    assert a.meat_eaten == b.meat_eaten
     la = a.genealogy[: a.genealogy_used]
     lb = b.genealogy[: b.genealogy_used]
     assert np.array_equal(la, lb), "genealogy"
@@ -79,6 +80,7 @@ def test_continuation_identical(tmp_path: Path) -> None:
         move_cost=0.0,
         turn_cost=0.0,
         food_growth_rate=0.2,
+        mate_range=1e6,  # dense mating: births must happen inside the window
         # fast cycles (stage 10): the save lands mid-day/mid-season, so a
         # restored world must resume with the exact same light and season
         # phase — they derive from the saved tick, never from stored state
@@ -134,6 +136,14 @@ def test_v2_save_is_rejected_clearly(tmp_path: Path) -> None:
         load_world(str(path))
 
 
+def test_v3_save_is_rejected_clearly(tmp_path: Path) -> None:
+    """Pre-stage-11 saves lack meat; the version gate must say so."""
+    path = tmp_path / "old.npz"
+    np.savez(path, format_version=np.int32(3))
+    with pytest.raises(ValueError, match="format"):
+        load_world(str(path))
+
+
 def test_numba_rng_state_helpers_roundtrip() -> None:
     """Guard: numba._helperlib must keep exposing the stream (see genome.py)."""
 
@@ -151,7 +161,12 @@ def test_numba_rng_state_helpers_roundtrip() -> None:
 
 
 def test_genealogy_ids_and_log() -> None:
-    cfg = Config(max_creatures=64, initial_creatures=32, reproduce_threshold=40.0)
+    cfg = Config(
+        max_creatures=64,
+        initial_creatures=32,
+        reproduce_threshold=40.0,
+        mate_range=1e6,  # dense-mating economy; this test pins ids, not ecology
+    )
     w = World(cfg, seed=7)
     for _ in range(60):
         advance(w)
@@ -174,11 +189,20 @@ def test_genealogy_ids_and_log() -> None:
 
 
 def test_lineage_survives_slot_recycling() -> None:
-    cfg = Config(max_creatures=8, initial_creatures=4, reproduce_threshold=100.0)
+    cfg = Config(
+        max_creatures=8,
+        initial_creatures=4,
+        reproduce_threshold=100.0,
+        mate_range=1e6,
+    )
     w = World(cfg, seed=3)
-    parent = int(np.flatnonzero(w.alive)[0])
+    slots = np.flatnonzero(w.alive)
+    parent = int(slots[0])
+    partner = int(slots[1])
     parent_creature = int(w.creature_id[parent])
     w.energy[parent] = 200.0
+    w.energy[partner] = 60.0  # above half the child (50), below the threshold
+    step.phase_rebuild_counts(w)
     step.phase_reproduce(w)
 
     children = np.flatnonzero(w.alive & (w.parent_id == parent_creature))
@@ -208,10 +232,12 @@ def test_genealogy_overflow_counter() -> None:
         initial_creatures=4,
         reproduce_threshold=100.0,
         genealogy_capacity=5,
+        mate_range=1e6,
     )
     w = World(cfg, seed=1)
     for _ in range(10):
         w.energy[w.alive] = 200.0
+        step.phase_rebuild_counts(w)
         step.phase_reproduce(w)
         if w.free_count == 0:
             break

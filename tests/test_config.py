@@ -84,6 +84,19 @@ def test_environment_validation() -> None:
         Config(day_amp=1.2)
 
 
+def test_biology_validation() -> None:
+    """Stage 11 biology knobs: bounds are enforced with clear messages."""
+    Config(mate_range=0.001, senescence_rate=0.0)  # senescence off allowed
+    with pytest.raises(ValueError, match="mate_range"):
+        Config(mate_range=0.0)
+    with pytest.raises(ValueError, match="senescence_rate"):
+        Config(senescence_rate=-0.1)
+    with pytest.raises(ValueError, match="carrion_yield"):
+        Config(carrion_yield=1.5)
+    with pytest.raises(ValueError, match="meat_decay"):
+        Config(meat_decay=1.0)  # decay < 1 so meat never flips sign
+
+
 def test_unknown_field_fails_loudly(tmp_path: Path) -> None:
     path = write_json(tmp_path / "bad.json", {"food_growht_rate": 0.01})
     with pytest.raises(ValueError, match="unknown Config fields"):

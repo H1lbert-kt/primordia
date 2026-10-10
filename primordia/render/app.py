@@ -186,7 +186,7 @@ def run_app(
 
         pixels = pygame.surfarray.pixels2d(world_surface)
         light = float(light_level(cfg, world.tick))
-        draw_world(pixels, world, camera, food_lut, terrain_lut, light, shifts, buffers)
+        draw_world(pixels, world, camera, food_lut, terrain_lut, light, shifts, buffers, settings.meat_color)
         stamp_creatures(pixels, world, camera, settings, shifts, light)
         del pixels
         overlay.fill((0, 0, 0, 0))

@@ -1,4 +1,4 @@
-"""Stage-3 tests: energy split, inheritance, mutation, clamps, determinism."""
+"""Stage-3/11 tests: sexual birth, inheritance, mutation, clamps, determinism."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ ARRAYS = (
     "creature_id",
     "alive",
     "food",
+    "meat",
 )
 
 
@@ -29,15 +30,32 @@ def first_alive(w: World) -> int:
     return int(np.flatnonzero(w.alive)[0])
 
 
-def birth_of_one_parent(cfg: Config, seed: int = 2) -> tuple[World, int, int]:
-    """One eligible parent, one phase_reproduce call; returns (world, parent, child)."""
+def birth_of_couple(
+    cfg: Config, seed: int = 2, partner_energy: float = 90.0
+) -> tuple[World, int, int, int]:
+    """One eligible initiator + one nearby partner; returns (world, i, j, child).
+
+    The partner sits within ``mate_range`` of the initiator, far from everyone
+    else, and below the threshold (but above its half of the child) so only
+    the initiator breeds: exactly one birth per call. The child's slot is
+    always below the initiator's (free-list LIFO), so the ascending scan
+    never re-breeds the newborn in the same pass.
+    """
     w = World(cfg, seed=seed)
-    parent = first_alive(w)
-    w.energy[parent] = 200.0
+    slots = np.flatnonzero(w.alive)
+    i = int(slots[0])
+    j = int(slots[1])
+    w.energy[i] = 200.0
+    w.energy[j] = partner_energy
+    w.pos[j] = w.pos[i] + np.float32([1.0, 0.0])  # distance 1 < default mate_range
+    # park everyone else far away so they never interfere
+    for k in slots[2:]:
+        w.pos[k] = w.pos[i] + np.float32([100.0, 100.0])
+    step.phase_rebuild_counts(w)  # the CSR must list the moved slots
     step.phase_reproduce(w)
-    children = np.flatnonzero(w.alive & (w.parent_id == w.creature_id[parent]))
+    children = np.flatnonzero(w.alive & (w.parent_id == w.creature_id[i]))
     assert children.size == 1
-    return w, parent, int(children[0])
+    return w, i, j, int(children[0])
 
 
 def test_child_starts_with_empty_memory() -> None:
@@ -47,32 +65,45 @@ def test_child_starts_with_empty_memory() -> None:
         initial_creatures=5,
         reproduce_threshold=100.0,
     )
-    w, parent, child = birth_of_one_parent(cfg)
-    w.hidden_prev[parent] = 0.7  # simulate a lived-in parent...
-    step.phase_reproduce(w)  # (a second birth, parent still eligible)
-    kids = np.flatnonzero(w.alive & (w.parent_id == w.creature_id[parent]))
+    w, i, _j, child = birth_of_couple(cfg)
+    w.hidden_prev[i] = 0.7  # simulate a lived-in initiator...
+    step.phase_reproduce(w)  # (a second birth, initiator still eligible)
+    kids = np.flatnonzero(w.alive & (w.parent_id == w.creature_id[i]))
     assert kids.size >= 1
     assert np.all(w.hidden_prev[kids] == 0.0)
     assert w.hidden_prev[child].max() <= 0.0  # the first child too
 
 
-def test_reproduce_splits_energy() -> None:
+def test_reproduce_splits_energy_between_two_parents() -> None:
+    cfg = Config(max_creatures=10, initial_creatures=5, reproduce_threshold=100.0)
+    w, i, j, child = birth_of_couple(cfg)
+
+    total = float(w.energy[i]) + float(w.energy[j]) + float(w.energy[child])
+    assert total == pytest.approx(290.0, rel=1e-6)  # no energy created (200+90)
+    # child_e = 0.5 * 200 = 100; each parent paid 50
+    assert w.energy[i] == pytest.approx(150.0, rel=1e-6)
+    assert w.energy[j] == pytest.approx(40.0, rel=1e-6)
+    assert w.energy[child] == pytest.approx(100.0, rel=1e-6)
+    assert w.alive[i] and w.alive[j] and w.alive[child]
+    assert w.free_count == 4  # 5 free slots, one consumed by the birth
+    assert w.births == 1
+
+
+def test_no_partner_no_birth() -> None:
+    """An eligible initiator alone in the world simply does not reproduce."""
     cfg = Config(max_creatures=10, initial_creatures=5, reproduce_threshold=100.0)
     w = World(cfg, seed=0)
-    parent = first_alive(w)
-    w.energy[parent] = 200.0
+    i = first_alive(w)
+    w.energy[i] = 200.0
+    # everyone else parked beyond mate_range
+    slots = np.flatnonzero(w.alive)
+    for k in slots[1:]:
+        w.pos[k] = w.pos[i] + np.float32([500.0, 500.0])
+    step.phase_rebuild_counts(w)
     step.phase_reproduce(w)
-
-    children = np.flatnonzero(w.alive & (w.parent_id == w.creature_id[parent]))
-    assert children.size == 1
-    child = int(children[0])
-    total = float(w.energy[parent]) + float(w.energy[child])
-    assert total == pytest.approx(200.0, rel=1e-6)  # no energy created
-    assert w.energy[parent] == pytest.approx(100.0, rel=1e-6)
-    assert w.energy[child] == pytest.approx(100.0, rel=1e-6)
-    assert w.alive[parent] and w.alive[child]
-    assert w.free_count == 4
-    assert w.births == 1
+    assert w.births == 0
+    assert w.energy[i] == 200.0  # no debit without a partner
+    assert w.free_count == cfg.max_creatures - cfg.initial_creatures
 
 
 def test_child_inherits_state_and_genome() -> None:
@@ -80,32 +111,80 @@ def test_child_inherits_state_and_genome() -> None:
         max_creatures=10,
         initial_creatures=5,
         reproduce_threshold=100.0,
-        mutation_rate=0.0,  # pure clone
+        mutation_rate=0.0,  # crossover only, no noise
     )
-    w, parent, child = birth_of_one_parent(cfg)
+    w, i, j, child = birth_of_couple(cfg)
 
-    assert np.array_equal(w.genome[child], w.genome[parent])
+    # every gene is one parent's copy (uniform crossover, no mutation)
+    from_parent = (w.genome[child] == w.genome[i]) | (w.genome[child] == w.genome[j])
+    assert np.all(from_parent)
     assert w.age[child] == 0
-    assert w.parent_id[child] == w.creature_id[parent]
-    np.testing.assert_array_equal(w.pos[child], w.pos[parent])
+    assert w.parent_id[child] == w.creature_id[i]  # lineage tracks the initiator
+    np.testing.assert_array_equal(w.pos[child], w.pos[i])
     np.testing.assert_array_equal(w.vel[child], 0.0)
-    assert w.angle[child] == w.angle[parent]
-    assert w.species_id[child] == w.species_id[parent]
+    assert w.angle[child] == w.angle[i]
+    assert w.species_id[child] == w.species_id[i]
 
 
-def test_mutation_zero_std_is_clone_and_full_std_changes_genes() -> None:
+def test_crossover_mixes_both_parents() -> None:
+    """With distinguishable parents the child's genes come from both."""
+    cfg = Config(
+        max_creatures=10,
+        initial_creatures=5,
+        reproduce_threshold=100.0,
+        mutation_rate=0.0,
+    )
+    w = World(cfg, seed=2)
+    slots = np.flatnonzero(w.alive)
+    i, j = int(slots[0]), int(slots[1])
+    w.genome[i] = 1.0
+    w.genome[j] = -1.0
+    w.energy[i] = 200.0
+    w.energy[j] = 90.0
+    w.pos[j] = w.pos[i] + np.float32([1.0, 0.0])
+    for k in slots[2:]:
+        w.pos[k] = w.pos[i] + np.float32([100.0, 100.0])
+    step.phase_rebuild_counts(w)
+    step.phase_reproduce(w)
+
+    assert w.births == 1
+    child = int(np.flatnonzero(w.alive & (w.parent_id == w.creature_id[i]))[0])
+    genes = w.genome[child]
+    assert np.any(genes == 1.0) and np.any(genes == -1.0)
+
+
+def test_mutation_zero_std_is_crossover_only_and_full_std_changes_genes() -> None:
     base = dict(max_creatures=10, initial_creatures=5, reproduce_threshold=100.0)
 
-    w, parent, child = birth_of_one_parent(
-        Config(mutation_rate=1.0, mutation_std=0.0, trait_mutation_std=0.0, **base)
-    )
-    assert np.array_equal(w.genome[child], w.genome[parent])  # draws happen, add 0
+    def couple(**extra) -> tuple[World, int, int, int]:
+        cfg = Config(**(base | extra))
+        w = World(cfg, seed=2)
+        slots = np.flatnonzero(w.alive)
+        i, j = int(slots[0]), int(slots[1])
+        w.energy[i] = 200.0
+        w.energy[j] = 90.0
+        w.pos[j] = w.pos[i] + np.float32([1.0, 0.0])
+        for k in slots[2:]:
+            w.pos[k] = w.pos[i] + np.float32([100.0, 100.0])
+        return w, i, j, 0
 
-    cfg = Config(mutation_rate=1.0, mutation_std=0.05, trait_mutation_std=0.1, **base)
-    w, parent, child = birth_of_one_parent(cfg)
-    p = cfg.brain_params
-    assert np.all(w.genome[child, :p] != w.genome[parent, :p])  # every brain gene
-    assert w.genome[child, p] != w.genome[parent, p]  # max_speed changed
+    # identical parents + zero mutation std: child genes equal one parent exactly
+    w, i, j, _ = couple(mutation_rate=1.0, mutation_std=0.0, trait_mutation_std=0.0)
+    w.genome[j] = w.genome[i]
+    step.phase_rebuild_counts(w)
+    step.phase_reproduce(w)
+    child = int(np.flatnonzero(w.alive & (w.parent_id == w.creature_id[i]))[0])
+    assert np.array_equal(w.genome[child], w.genome[i])
+
+    # full mutation on every gene: nothing survives unchanged from either parent
+    w, i, j, _ = couple(mutation_rate=1.0, mutation_std=0.05, trait_mutation_std=0.1)
+    step.phase_rebuild_counts(w)
+    step.phase_reproduce(w)
+    child = int(np.flatnonzero(w.alive & (w.parent_id == w.creature_id[i]))[0])
+    p = Config(**base).brain_params
+    not_i = w.genome[child, :p] != w.genome[i, :p]
+    not_j = w.genome[child, :p] != w.genome[j, :p]
+    assert np.all(not_i & not_j)
     assert 0.0 <= w.genome[child, p + 3] <= 1.0  # diet stays a valid fraction
 
 
@@ -113,14 +192,16 @@ def test_trait_clamps_stay_valid() -> None:
     cfg = Config(
         max_creatures=50,
         initial_creatures=10,
-        initial_energy=1000.0,  # energy stays far above threshold: 30 generations
+        initial_energy=1000.0,  # energy stays far above threshold: many generations
         reproduce_threshold=40.0,
         mutation_rate=1.0,
         mutation_std=0.5,
         trait_mutation_std=5.0,  # violent: exp(+-5) swings force the clamps
+        mate_range=1e6,  # everyone can reach everyone: fill the capacity
     )
     w = World(cfg, seed=3)
     for _ in range(30):
+        step.phase_rebuild_counts(w)
         step.phase_reproduce(w)
 
     alive = w.alive
@@ -148,6 +229,7 @@ def test_energy_conserved_with_births() -> None:
         move_cost=0.0,
         turn_cost=0.0,  # isolate the food <-> energy accounting from steering
         food_growth_rate=0.0,  # food only transfers to creatures
+        mate_range=1e6,
     )
     w = World(cfg, seed=4)
     total0 = float(w.food.sum(dtype=np.float64)) + float(w.energy.sum(dtype=np.float64))
@@ -159,7 +241,12 @@ def test_energy_conserved_with_births() -> None:
 
 
 def test_determinism_with_reproduction() -> None:
-    cfg = Config(max_creatures=150, initial_creatures=50, reproduce_threshold=40.0)
+    cfg = Config(
+        max_creatures=150,
+        initial_creatures=50,
+        reproduce_threshold=40.0,
+        mate_range=1e6,
+    )
 
     def run(seed: int) -> World:
         w = World(cfg, seed=seed)
@@ -180,7 +267,12 @@ def test_determinism_with_reproduction() -> None:
 
 
 def test_capacity_blocks_net_growth() -> None:
-    cfg = Config(max_creatures=20, initial_creatures=20, reproduce_threshold=1.0)
+    cfg = Config(
+        max_creatures=20,
+        initial_creatures=20,
+        reproduce_threshold=1.0,
+        mate_range=1e6,
+    )
     w = World(cfg, seed=5)
     for _ in range(50):
         advance(w)
@@ -196,6 +288,7 @@ def test_move_cost_quadratic() -> None:
         initial_energy=100.0,
         metabolic_cost=0.1,
         move_cost=0.05,
+        senescence_rate=0.0,  # isolate the quadratic move cost from wear
     )
     w = World(cfg, seed=6)
     w.vel[:, 0] = 3.0

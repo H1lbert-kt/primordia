@@ -22,12 +22,18 @@ pytest -q
 - **No fitness, no objectives.** Energy is the only currency: eat food (or
   meat), pay metabolic and movement costs, and split when you cross
   `reproduce_threshold`. Death = energy ≤ 0, `max_age`, or a predator's bite.
-- **Evolvable body and brain.** Each creature is a genome of 437 values: a
-  29-input network (7-ray food sum, creatures and food peak channels, three
-  smells, left/right food antennas, internal state, ambient light) → 10
+- **Evolvable body and brain.** Each creature is a genome of 447 values: a
+  30-input network (7-ray food sum, creatures, prey and carrion peak
+  channels, left/right food antennas, internal state, ambient light) → 10
   hidden units with Elman recurrence → turn, accelerate, eat/attack — plus
   body traits: max speed, size, vision range, and *diet* (0 = herbivore;
   predation capability is itself a trait that has to evolve).
+- **Sex and aging, not just cloning.** Reproduction is sexual: an initiator
+  above the threshold searches for a nearby partner, each parent pays half
+  the child's energy, and the genome is a per-gene crossover plus mutation.
+  Old bodies wear out (`w = exp(senescence_rate * age)`): metabolism grows
+  while speed and vision shrink. No partner → no birth: mobility and
+  aggregation get selected without being programmed.
 - **A world that pushes back.** Terrain fertility and lakes shape where food
   grows, a sun sets a day/night light cycle (vision shrinks at night), and
   seasons modulate growth — all pure physics from `Config`, no objectives.
@@ -50,12 +56,14 @@ limitations in each experiment's README.
 > **Reproducibility note.** The tables and figures below were produced on the
 > pre-stage-9 tree (19-input, 12-hidden feedforward brains, uniform food
 > field, the old food economy). Stage 9 changed the brain layout (28 inputs,
-> 10 hidden units, Elman recurrence), stage 9.5 recalibrated the economy and
-> stage 10 added a 29th input (ambient light) plus terrain/day-night/seasons
-> (the experiment scripts pin all of it off via `STAGE8_BASE` so the *regime*
-> is preserved). The scripts reproduce the *protocol* on current
-> HEAD — trajectories land on different numbers; the original runs stay in
-> each experiment's gitignored `data/` cache.
+> 10 hidden units, Elman recurrence), stage 9.5 recalibrated the economy,
+> stage 10 added a 29th input (ambient light) plus terrain/day-night/seasons,
+> and stage 11 switched to sexual reproduction, added senescence and carrion
+> (30 inputs, `FORMAT_VERSION 4`). The experiment scripts pin the old regime
+> off via `STAGE8_BASE` so the *regime* is preserved — but reruns on current
+> HEAD use the sexual dynamics; the original asexual runs stay in each
+> experiment's gitignored `data/` cache (bit-exact reproduction needs the
+> pre-stage-9 commit).
 
 ### 1. Energy grows without a ceiling — and the obvious knobs don't fix it
 
@@ -194,7 +202,7 @@ primordia/
   config.py   world.py   genome.py   brain.py   sensors.py
   step.py     stats.py   io.py       bench.py
   render/     # pygame viewer + headless GIF recorder (never imported by core)
-tests/        # 92 tests: determinism, invariants, save/load, guards
+tests/        # 109 tests: determinism, invariants, save/load, guards
 experiments/  # one script + README per experiment
 run.py        # CLI: --seed --headless --ticks --load --save --stats
               #      --config --record --screenshot --select
@@ -202,14 +210,15 @@ run.py        # CLI: --seed --headless --ticks --load --save --stats
 
 ## Roadmap status
 
-Stages 1–10 of the plan are implemented: world+food, brain+sensors,
+Stages 1–11 of the plan are implemented: world+food, brain+sensors,
 genome+reproduction, viewer, evolvable predation, stats/plots,
 save/load+genealogy, experiments/demo/publication, the guided-world stage
 (persistent food patches, richer senses, Elman recurrence, a richer
 viewer), the balance stage (food economy recalibrated, turning now costs
-energy, larger sprites), and the environment stage (terrain, water,
-day/night light, seasons). The "real world" roadmap continues with
-stage 11 (biology), 12 (ecology), 13–16 (civilization+). Known open
+energy, larger sprites), the environment stage (terrain, water,
+day/night light, seasons), and the biology stage (sexual reproduction,
+senescence, carrion/smell). The "real world" roadmap continues with
+stage 12 (ecology), 13–16 (civilization+). Known open
 problems are documented above (predation still a trickle, creatures still
 circle) rather than hidden.
 

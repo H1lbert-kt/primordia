@@ -14,6 +14,38 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   README principal em **inglês**.
 
 ## Estado atual do repositório (verificado em 2026-10-09)
+- **Etapa 11 ("biologia") concluída (2026-10-09, commit pendente
+  de `/cp`):** plano em `.opencode/plans/etapa-11-biologia.md` (fases A–F);
+  decisões do usuário: reprodução **100% sexual** (sem fallback assexuado;
+  colapso ⇒ calibrar com o usuário), 4º smell = carniça → layout **30 in /
+  443 brain_params / 447 genome**, carne = predação deposita
+  `carrion_yield·(1−bite_efficiency)·take` + morte por idade deposita
+  `carrion_yield·energia` (fome ~0), `max_age` 2000→**5000**,
+  `senescence_rate` default **0.0005** (sweep Fase E: 0.002 extingue,
+  0.001 colapsa p/ 73–126, 0.0005 estável 277–417). Novos Config:
+  `mate_range=3.0`, `senescence_rate=0.0005`, `carrion_yield=0.3`,
+  `meat_decay=0.02`. Wear `w=exp(senescence_rate·age)`: metabolismo ×w,
+  velocidade/visão `/w`. Busca de par em células CSR (distância toroidal
+  exata decide, determinístico; empate → slot menor); crossover uniforme
+  por gene + mutação; `child_e = child_fraction·energy[i]`, cada pai paga
+  metade. Nova fase `decay_meat` (12 fases totais). Cheiro carrion =
+  `meat/capacity/9` por célula vizinha. **io `FORMAT_VERSION = 4`**
+  (`_ARRAYS` += `meat`, `_FLOAT_SCALARS` += `meat_eaten`; v1-v3 →
+  ValueError). **Render:** `meat_color=(140,40,36)` em `Settings`, blend
+  `rgb = lerp(lerp(terreno, comida, a_f), carne, a_m) × light` com
+  `a_m=clip(meat/cap,0,1)`, HUD `mean energy … meat N`
+  (`/tmp/opencode/stage11_meat_zoom.png`). **GATE 3 seeds (42/7/123) ×
+  10k:** duro ✓ — sem extinção (min 158–189), pop média 590–747 < 1900,
+  nascimentos 4599–6163 > 0, fracE 0.029–0.035 < 0.5; medido — predação
+  **110/10/612** (≥2/3 ✓), `meat_eaten` 537–22877 ✓, `genome_dist` final
+  3.49–6.45, idade na morte distribuída 0–3000 (sem cliff em 5000 —
+  wear mata de fome antes do `max_age`; `deaths_age = 0` documentado).
+  **Bench:** **1397/627/292** a 500/2000/5000 — piso 30 @N=2000 com 21×.
+  GIF `docs/demo.gif` regenerado (9000 ticks, 26 frames, **1.18 MB**).
+  `STAGE8_BASE`/README: reruns em HEAD já são sexuais (nota
+  "Reproducibility"). README: genoma **447** / **30 inputs** / **109
+  testes** / seção "Sex and aging". **Testes: 109 passed.** Próximo passo
+  do usuário: `/cp`.
 - **Etapa 10 ("ambiente físico") concluída (2026-10-09, commit pendente
   de `/cp`):** plano em `.opencode/plans/etapa-10-ambiente.md` (fases A–F);
   decisões do usuário: luz vira input → layout **29 in / 433 brain_params /
@@ -519,7 +551,7 @@ antes de dizer que uma mudança de tick não regrediu desempenho.
 9.5. Balanço e pressão seletiva (economia, turn_cost, zoom) ✓
 
 Roadmap "mundo real" aprovado (`.opencode/plans/roadmap-mundo-real.md`):
-10 ambiente (terreno/estações/luz) ✓ → 11 biologia (sexualidade/doença)
+10 ambiente (terreno/estações/luz) ✓ → 11 biologia (sexualidade/senescência/carniça) ✓
 → 12 ecologia (ciclos tróficos) → 13–16 civilização+ (antiga 10–13).
 
 Trabalhe **apenas na etapa que o usuário indicar**.

@@ -77,17 +77,21 @@ def apply_actions(
     angle: np.ndarray,
     vel: np.ndarray,
     energy: np.ndarray,
+    age: np.ndarray,
     alive: np.ndarray,
     genome: np.ndarray,
     max_turn: np.float32,
     turn_cost: np.float32,
     traits_off: np.int32,
+    senescence_rate: np.float32,
 ) -> None:
     """Map logits to steering: angle += turn, vel = dir * speed, gate = sigmoid.
 
     Turning drains ``turn_cost * |turn| * max_turn`` energy (radians actually
     rotated), so perpetual spinning starves — a physical law, never a fitness
-    term (stage 9.5).
+    term (stage 9.5). Senescence (stage 11): effective top speed shrinks by
+    the wear factor ``w = exp(senescence_rate * age)`` — old bodies move
+    slower; rate 0 restores stage-10 speed exactly.
     """
     tau = np.float32(2.0 * np.pi)
     for i in prange(alive.size):
@@ -107,6 +111,8 @@ def apply_actions(
         energy[i] = energy[i] - turn_cost * abs(turn) * max_turn
 
         speed = accel * genome[i, traits_off]
+        if senescence_rate > 0.0:
+            speed = speed / np.exp(senescence_rate * np.float32(age[i]))
         c = np.cos(a)
         s = np.sin(a)
         vel[i, 0] = c * speed

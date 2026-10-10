@@ -54,6 +54,10 @@ class Settings:
     terrain_mid: tuple[int, int, int] = (58, 88, 42)
     terrain_high: tuple[int, int, int] = (34, 104, 40)
 
+    # carrion overlay (stage 11): dark red blended over ground+food with
+    # alpha = clip(meat / food_capacity, 0, 1); full cell reads as raw meat
+    meat_color: tuple[int, int, int] = (140, 40, 36)
+
     # creature scatter: pixel radius = clamp(round(size * zoom * size_scale), 1, max)
     size_scale: float = 3.0
     max_radius_px: int = 8

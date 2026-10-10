@@ -61,6 +61,7 @@ def test_water_costs_more_move_energy() -> None:
         max_creatures=4,
         initial_creatures=2,
         water_move_cost=3.0,
+        senescence_rate=0.0,  # flat metabolic bill so the delta is exact
     )
     w = World(cfg, seed=3)
     water_cells = np.argwhere(w.terrain == 0.0)

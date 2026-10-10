@@ -38,6 +38,8 @@ def test_dtypes_and_shapes() -> None:
     assert w.food.dtype == np.float32
     assert w.terrain.dtype == np.float32
     assert w.terrain.shape == w.food.shape
+    assert w.meat.dtype == np.float32
+    assert w.meat.shape == w.food.shape
     assert w.alive_count == cfg.initial_creatures
     assert w.alive_count + w.free_count == n
 
@@ -92,6 +94,8 @@ def test_energy_conservation_without_growth_or_deaths() -> None:
         food_growth_rate=0.0,  # food then only transfers to creatures
         move_cost=0.0,  # isolate the food <-> energy accounting from balance
         turn_cost=0.0,
+        senescence_rate=0.0,  # flat metabolic bill so `removed` is exact
+        mutation_rate=0.0,  # diet stays 0: no predation leaks into meat
     )
     w = World(cfg, seed=7)
     food0 = float(w.food.sum(dtype=np.float64))

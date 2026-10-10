@@ -174,13 +174,15 @@ def draw_world(
     light: float,
     shifts: PixelFormat,
     buffers: FrameBuffers,
+    meat_color: tuple[int, int, int] = (140, 40, 36),
 ) -> None:
-    """Write terrain + food into ``pixels`` ((w, h) uint32, packed RGB).
+    """Write terrain + food + carrion into ``pixels`` ((w, h) uint32, packed RGB).
 
-    Per cell: ``rgb = lerp(terrain, food, alpha) * light`` with
-    ``alpha = food / capacity`` — rich food hides the ground, depletion
-    reveals terrain (stage 10). The blend runs on the 200x200 cell grid
-    once per frame; the viewport step is the same single gather as before.
+    Per cell: ``rgb = lerp(lerp(terrain, food, a_f), meat, a_m) * light`` with
+    ``a_f = food / capacity`` and ``a_m = clip(meat / capacity, 0, 1)`` —
+    rich food hides the ground, depletion reveals terrain, carrion paints
+    over both (stage 11). The blend runs on the 200x200 cell grid once per
+    frame; the viewport step is the same single gather as before.
     """
     cap = float(world.config.food_capacity)
     f_idx = np.clip(world.food * (255.0 / cap), 0.0, 255.0).astype(np.intp)
@@ -188,7 +190,11 @@ def draw_world(
     alpha = (f_idx * np.float32(1.0 / 255.0))[..., None]
     food_rgb = food_lut[f_idx].astype(np.float32)
     terrain_rgb = terrain_lut[t_idx].astype(np.float32)
-    rgb = (terrain_rgb + (food_rgb - terrain_rgb) * alpha) * float(light)
+    rgb = terrain_rgb + (food_rgb - terrain_rgb) * alpha
+    meat_a = np.clip(world.meat * np.float32(1.0 / cap), 0.0, 1.0)[..., None]
+    meat_rgb = np.asarray(meat_color, dtype=np.float32)[None, None, :]
+    rgb = rgb + (meat_rgb - rgb) * meat_a
+    rgb *= float(light)
     np.clip(rgb, 0.0, 255.0, out=rgb)
     cell_pixels = rgb_to_pixel(rgb.astype(np.uint8), shifts)
     np.take(cell_pixels.ravel(), camera.flat_indices(), out=buffers.packed)

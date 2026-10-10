@@ -100,7 +100,7 @@ def test_input_groups_tile_the_input_vector() -> None:
             assert np.all(np.diff(idx) > 0)  # channel order preserved
             covered.extend(int(v) for v in idx)
         assert sorted(covered) == list(range(cfg.sensor_input_dim))
-        assert {"energy", "speed", "smell meat"} <= labels
+        assert {"energy", "speed", "smell prey", "smell carrion"} <= labels
 
 
 def test_ray_peak_sees_the_richest_cell() -> None:
@@ -153,7 +153,7 @@ def test_antennas_split_food_by_heading() -> None:
     step.phase_perceive(w)
 
     n = cfg.n_rays
-    left = float(w.sensor_buf[slot, 3 * n + 3])
-    right = float(w.sensor_buf[slot, 3 * n + 4])
+    left = float(w.sensor_buf[slot, 3 * n + 4])
+    right = float(w.sensor_buf[slot, 3 * n + 5])
     assert left > 0.0
     assert right == pytest.approx(0.0)
