@@ -47,6 +47,7 @@ from numba import njit, prange
 
 from .brain import apply_actions, think
 from .cycles import growth_multiplier, light_level
+from .ecology import HERB_MAX, PRED_MIN
 from .genome import _reproduce
 from .sensors import perceive
 from .world import World
@@ -412,6 +413,9 @@ def _bite(
     traits_off: np.int32,
     meat: np.ndarray,
     carrion_yield: np.float32,
+    bite_by_diet: np.ndarray,
+    herb_max: np.float32,
+    pred_min: np.float32,
 ) -> tuple[int, int]:
     """Serial contact predation: gate * diet budget drains neighbours.
 
@@ -425,6 +429,11 @@ def _bite(
     never created. A victim left at zero energy dies here: its slot is
     pushed onto the free-list and counted as a predation death.
 
+    Each successful take is also attributed to the attacker's diet class
+    (stage 12.5 measurement: ``bite_by_diet[herb/omn/pred] += 1``, buckets
+    from ``ecology.HERB_MAX``/``PRED_MIN``) — a counter the tick never
+    reads, so trajectories are unchanged.
+
     Slot order is fixed and no random numbers are drawn, so the outcome is
     deterministic. Returns ``(free_count, deaths_predation)``.
     """
@@ -434,9 +443,16 @@ def _bite(
     for i in range(alive.size):
         if not alive[i]:
             continue
-        budget = bite_rate * actions[i, 2] * genome[i, traits_off + 3]
+        diet_i = genome[i, traits_off + 3]
+        budget = bite_rate * actions[i, 2] * diet_i
         if budget <= 0.0:
             continue
+        if diet_i < herb_max:
+            bucket = 0
+        elif diet_i > pred_min:
+            bucket = 2
+        else:
+            bucket = 1
         px = pos[i, 0]
         py = pos[i, 1]
         ix0 = int(px * inv_cell_w)
@@ -484,6 +500,7 @@ def _bite(
                     take = energy[j] if energy[j] < budget else budget
                     if take <= 0.0:
                         continue
+                    bite_by_diet[bucket] = bite_by_diet[bucket] + 1
                     energy[j] = energy[j] - take
                     energy[i] = energy[i] + bite_efficiency * take
                     # the dissipating share lands as carrion on the victim cell
@@ -542,6 +559,9 @@ def phase_bite(world: World) -> None:
         np.int32(cfg.brain_params),
         world.meat,
         np.float32(cfg.carrion_yield),
+        world.bite_by_diet,
+        np.float32(HERB_MAX),
+        np.float32(PRED_MIN),
     )
     world.free_count = int(free_count)
     world.deaths_predation += int(n_pred)

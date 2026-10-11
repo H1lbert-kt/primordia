@@ -112,7 +112,29 @@ def test_invalid_value_fails_validation(tmp_path: Path) -> None:
 def test_non_object_json_fails(tmp_path: Path) -> None:
     path = tmp_path / "list.json"
     path.write_text("[1, 2, 3]", encoding="utf-8")
-    with pytest.raises(ValueError, match="JSON object"):
+    with pytest.raises(ValueError, match="expected an object"):
+        load_config(str(path))
+
+
+def test_toml_overrides_apply(tmp_path: Path) -> None:
+    """Stage 12.5: .toml overrides (comments allowed) behave like JSON."""
+    path = tmp_path / "proto.toml"
+    path.write_text(
+        "# predation context for stages 13+\n"
+        "bite_rate = 12.0\n"
+        "contact_range = 2.5\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(str(path))
+    assert cfg.bite_rate == 12.0
+    assert cfg.contact_range == 2.5
+    assert cfg.eat_rate == Config().eat_rate  # untouched fields keep defaults
+
+
+def test_toml_unknown_field_fails_loudly(tmp_path: Path) -> None:
+    path = tmp_path / "bad.toml"
+    path.write_text("bite_rte = 12.0\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="unknown Config fields"):
         load_config(str(path))
 
 

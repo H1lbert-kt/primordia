@@ -25,6 +25,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 from primordia.config import Config  # noqa: E402
+from primordia import stats  # noqa: E402
 from primordia.stats import StatsHistory, StatsRecorder  # noqa: E402
 from primordia.step import advance  # noqa: E402
 from primordia.world import World  # noqa: E402
@@ -76,14 +77,20 @@ def run_variant(
 
     Returns the history from ``npz`` (already on disk — it doubles as the
     cache, so an interrupted batch resumes where it stopped unless
-    ``force``). Sequential by contract: never call from two threads.
+    ``force``; a cache written before new stats columns existed is treated
+    as stale and rerun). Sequential by contract: never call from two
+    threads.
     """
     if npz.exists() and not force:
         history = StatsRecorder.load(str(npz))
-        if len(history) == ticks:
+        missing = [c for c in stats.COLUMNS if c not in history.data]
+        if len(history) == ticks and not missing:
             print(f"  seed={seed}: cached {npz.name}", flush=True)
             return history
-        print(f"  seed={seed}: stale ({len(history)} != {ticks} ticks), rerunning")
+        reason = f"{len(history)} != {ticks} ticks"
+        if missing:
+            reason += f", missing columns {missing}"
+        print(f"  seed={seed}: stale ({reason}), rerunning")
 
     if not isinstance(cfg, Config):
         cfg = Config(**cfg)

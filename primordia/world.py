@@ -175,6 +175,13 @@ class World:
         self.deaths_predation = 0
         # Total energy ever extracted from carrion (stage 11 gate metric).
         self.meat_eaten = 0.0
+        # Cumulative bites by the *attacker's* diet class (stage 12.5):
+        # [herbivore (< HERB_MAX), omnivore, predator (> PRED_MIN)] — the
+        # measurement buckets of ecology.py, int64 counts of successful
+        # takes. Pure diagnostic: the tick never reads it, and it is
+        # deliberately not saved (io.py): a resumed run restarts the
+        # stats baseline at 0, same as the recorder does.
+        self.bite_by_diet = np.zeros(3, dtype=np.int64)
 
         # Genealogy (stage 7): birth-id allocator plus the pre-allocated
         # birth log; _reproduce writes rows through the cursor in-place.

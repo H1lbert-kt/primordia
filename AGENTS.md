@@ -13,9 +13,35 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
 - Código, identificadores, comentários, docstrings, mensagens de commit e
   README principal em **inglês**.
 
-## Estado atual do repositório (verificado em 2026-10-10)
-- **Etapa 12 ("ecologia") concluída (2026-10-10, commit pendente
-  de `/cp`):** plano em `.opencode/plans/etapa-12-ecologia.md` (fases A–F).
+## Estado atual do repositório (verificado em 2026-10-11)
+- **Etapa 12.5 ("ratchet de predação") implementada, commit pendente
+  de `/cp`:** ratchet **quebra com Config só** (nada de tick novo além de
+  contadores de diagnóstico). `Config.bite_rate`/`contact_range`/`bite_efficiency`
+  são as alavancas; experimento em `experiments/predator_survival/`:
+  screening 8 variantes × 3 seeds (42/7/13) × 6k + gate `--phase gate`
+  (base/reach/bigbite+ × 10k). Resultado: `reach` (bite_rate=12,
+  contact_range=2.5) = 1179 mortes por predação/run vs 43 do base a 10k;
+  `diet_max` final médio 0.394 (max 0.495 seed 42), `diet_p50` 0.207 —
+  mas **`bite_pred = 0` em todas as runs**: nenhum atacante com
+  diet>0.66 completa mordida (diluição por crossover, previsão a priori
+  confirmada). Gate estrito (diet>0.5 em 3/3) ✗; predação ≥100/run ✓.
+  **Novas colunas de stats** (`primordia/stats.py`): `diet_p50/p90/p99`
+  (percentis amostrados com genome_dist, forward-fill) + `bite_herb/omni/pred`
+  (deltas por tick de `World.bite_by_diet`, buckets por dieta do atacante
+  <0.33/0.33–0.66/>0.66). `World.bite_by_diet` (3,) int64 — diagnóstico,
+  **não salvo** (sem bump de FORMAT_VERSION). `_bite` em `step.py` ganhou
+  3 params (`bite_by_diet`, `herb_max`, `pred_min`); bench **1133/788/310**
+  a 500/2000/5000 (piso 30 @N=2000 com 26×). **Testes: 133 passed.**
+  **TOML:** `load_config` aceita `.toml` (tomllib stdlib, Python ≥3.11) além
+  de `.json`; mensagem "expected an object of Config fields"; teste novo em
+  `tests/test_config.py` (12 passed). **`configs/proto_culture.toml`**:
+  pin da variante top `reach` (bite_rate=12, contact_range=2.5) para as
+  etapas 13+; defaults de `Config` **não mudaram** (reprodutibilidade).
+  `run_variant` staleness inclui colunas ausentes (npz antigo → re-run).
+  Próximo passo do usuário: `/cp`, depois planejar etapa 13 (canal de
+  sinais) em `.opencode/plans/etapa-13-sinais.md`.
+- **Etapa 12 ("ecologia") concluída (2026-10-10, commit `1c71de9`
+  em `origin/master`):** plano em `.opencode/plans/etapa-12-ecologia.md` (fases A–F).
   **Sem código de tick novo** — só métricas fora do tick, para medir o que
   10+11 deveriam produzir. `primordia/ecology.py` (novo): `classify_diets`
   (herbívora diet<0.33 / onívora / predadora diet>0.66, **só para contar,

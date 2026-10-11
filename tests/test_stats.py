@@ -300,7 +300,10 @@ def test_load_npz_without_ecology_columns() -> None:
         rec.record(w)
     old_cols = [c for c in stats.COLUMNS
                 if c not in ("n_species", "barrier", "matings_valid",
-                             "n_herbivore", "n_omnivore", "n_predator")]
+                             "n_herbivore", "n_omnivore", "n_predator",
+                             "diet_max", "meat_eaten",
+                             "diet_p50", "diet_p90", "diet_p99",
+                             "bite_herb", "bite_omni", "bite_pred")]
     payload = {name: rec.to_dict()[name] for name in old_cols}
     payload["columns"] = np.array(old_cols)
     payload["seed"] = np.int64(1)
@@ -314,3 +317,119 @@ def test_load_npz_without_ecology_columns() -> None:
     assert loaded["alive"].size == 4
     assert "genome_dist" in loaded.data
     assert "n_species" not in loaded.data
+    assert "diet_max" not in loaded.data
+    assert "meat_eaten" not in loaded.data
+    assert "diet_p50" not in loaded.data
+    assert "bite_herb" not in loaded.data
+
+
+def test_diet_max_tracks_living_diet() -> None:
+    """diet_max is the max diet over living slots; 0 when none are alive."""
+    cfg = Config(max_creatures=16, initial_creatures=0)
+    w = World(cfg, seed=1)
+    slots = w.spawn(3)
+    g = cfg.brain_params
+    w.genome[slots[0], g + 3] = 0.0
+    w.genome[slots[1], g + 3] = 0.4
+    w.genome[slots[2], g + 3] = 0.9
+    w.energy[slots] = 50.0
+    rec = StatsRecorder(capacity=4, sample_every=1, sample_size=4,
+                        cluster_every=1)
+    rec.record(w)
+    assert float(rec.to_dict()["diet_max"][0]) == pytest.approx(0.9, abs=1e-6)
+
+    w.alive[slots[2]] = False  # kill the max-diet creature
+    rec.record(w)
+    assert float(rec.to_dict()["diet_max"][1]) == pytest.approx(0.4, abs=1e-6)
+
+    w.alive[:] = False
+    rec.record(w)
+    assert float(rec.to_dict()["diet_max"][2]) == 0.0
+
+
+def test_meat_eaten_is_per_tick_delta() -> None:
+    """meat_eaten column sums to the cumulative World counter."""
+    cfg = Config(max_creatures=16, initial_creatures=8)
+    w = World(cfg, seed=1)
+    rec = StatsRecorder(capacity=8, sample_every=2, sample_size=8,
+                        cluster_every=1)
+    for _ in range(5):
+        step.advance(w)
+        rec.record(w)
+    data = rec.to_dict()
+    assert np.all(data["meat_eaten"] >= 0.0)
+    total = float(data["meat_eaten"].sum())
+    np.testing.assert_allclose(total, w.meat_eaten, rtol=1e-5)
+
+
+def test_diet_percentiles_ordered_and_bounded() -> None:
+    """p50 <= p90 <= p99 <= diet_max on sample ticks; 0 with no living."""
+    cfg = Config(max_creatures=16, initial_creatures=0)
+    w = World(cfg, seed=1)
+    slots = w.spawn(5)
+    g = cfg.brain_params
+    for slot, diet in zip(slots, (0.0, 0.1, 0.35, 0.7, 0.95)):
+        w.genome[slot, g + 3] = diet
+        w.energy[slot] = 50.0
+    rec = StatsRecorder(capacity=8, sample_every=1, sample_size=8,
+                        cluster_every=1)
+    rec.record(w)
+    data = rec.to_dict()
+    p50, p90, p99 = (float(data[k][0]) for k in ("diet_p50", "diet_p90",
+                                                 "diet_p99"))
+    # numpy percentiles of [0.0, 0.1, 0.35, 0.7, 0.95] (linear interp)
+    assert p50 == pytest.approx(0.35, abs=1e-6)
+    assert p90 == pytest.approx(0.85, abs=1e-6)
+    assert p99 == pytest.approx(0.94, abs=1e-6)
+    assert p50 <= p90 <= p99
+    assert p99 <= float(data["diet_max"][0]) + 1e-6
+
+    w.alive[:] = False
+    rec.record(w)
+    data = rec.to_dict()
+    assert float(data["diet_p50"][1]) == 0.0
+    assert float(data["diet_p90"][1]) == 0.0
+    assert float(data["diet_p99"][1]) == 0.0
+
+
+def test_diet_percentiles_forward_fill() -> None:
+    """Percentiles update on sample ticks and forward-fill in between."""
+    cfg = Config(max_creatures=16, initial_creatures=0)
+    w = World(cfg, seed=2)
+    slots = w.spawn(2)
+    g = cfg.brain_params
+    w.genome[slots[0], g + 3] = 0.2
+    w.genome[slots[1], g + 3] = 0.6
+    w.energy[slots] = 50.0
+    rec = StatsRecorder(capacity=8, sample_every=4, sample_size=8,
+                        cluster_every=1)
+    rec.record(w)  # row 0 always samples
+    tick0 = tuple(float(rec.to_dict()[k][0])
+                  for k in ("diet_p50", "diet_p90", "diet_p99"))
+    w.tick = 1
+    rec.record(w)
+    w.tick = 3
+    rec.record(w)
+    filled = rec.to_dict()
+    for k, v in zip(("diet_p50", "diet_p90", "diet_p99"), tick0):
+        assert np.array_equal(filled[k][1:3], np.full(2, v, dtype=np.float32))
+    w.tick = 4  # sample tick: recompute
+    rec.record(w)
+    assert float(rec.to_dict()["diet_p50"][3]) == pytest.approx(0.4, abs=1e-6)
+
+
+def test_bite_buckets_are_per_tick_deltas() -> None:
+    """bite_herb/omni/pred deltas sum to World.bite_by_diet."""
+    cfg = Config(max_creatures=16, initial_creatures=8, bite_rate=12.0)
+    w = World(cfg, seed=1)
+    rec = StatsRecorder(capacity=8, sample_every=2, sample_size=8,
+                        cluster_every=1)
+    for _ in range(5):
+        step.advance(w)
+        rec.record(w)
+    data = rec.to_dict()
+    for name in ("bite_herb", "bite_omni", "bite_pred"):
+        assert np.all(data[name] >= 0), name
+        assert int(data[name].sum()) == int(
+            w.bite_by_diet[("bite_herb", "bite_omni", "bite_pred").index(name)]
+        ), name

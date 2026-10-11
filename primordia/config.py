@@ -270,18 +270,26 @@ class Config:
 
 
 def load_config(path: str, base: Config | None = None) -> Config:
-    """Build a Config from a JSON overrides file applied on top of ``base``.
+    """Build a Config from an overrides file applied on top of ``base``.
 
-    The file is a flat object of Config field names (stage-8 ``--config``);
-    fields it does not mention keep their value from ``base`` (or the
-    defaults). Unknown names fail with :class:`ValueError` so a typo cannot
-    silently create a dead option, and the merged result still goes through
+    ``.toml`` files are parsed with the stdlib :mod:`tomllib` (stage 12.5,
+    ``configs/proto_culture.toml``); any other extension is JSON (stage-8
+    ``--config``). The file is a flat mapping of Config field names; fields
+    it does not mention keep their value from ``base`` (or the defaults).
+    Unknown names fail with :class:`ValueError` so a typo cannot silently
+    create a dead option, and the merged result still goes through
     ``Config.__post_init__`` validation.
     """
-    with open(path, encoding="utf-8") as fh:
-        overrides = json.load(fh)
+    if path.endswith(".toml"):
+        import tomllib
+
+        with open(path, "rb") as fh:
+            overrides = tomllib.load(fh)
+    else:
+        with open(path, encoding="utf-8") as fh:
+            overrides = json.load(fh)
     if not isinstance(overrides, dict):
-        raise ValueError(f"{path}: expected a JSON object of Config fields")
+        raise ValueError(f"{path}: expected an object of Config fields")
     allowed = {f.name for f in fields(Config)}
     unknown = sorted(set(overrides) - allowed)
     if unknown:

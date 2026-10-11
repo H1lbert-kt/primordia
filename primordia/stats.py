@@ -7,9 +7,19 @@ one row per recorded tick in pre-allocated int32/float32 columns:
     tick, alive, mean_energy, mean_age                      (state)
     births, deaths_famine, deaths_age, deaths_predation      (per-tick deltas
         of the World's cumulative counters)
+    meat_eaten       (per-tick delta of World.meat_eaten, stage 11 carrion)
+    bite_herb, bite_omni, bite_pred
+                     (per-tick deltas of World.bite_by_diet, stage 12.5:
+                     successful takes grouped by the *attacker's* diet class)
     n_herbivore, n_omnivore, n_predator                     (diet classes,
         stage 12: gauge over living slots, from ecology.classify_diets)
     speed/size/vision/diet mean and std over living slots    (diversity)
+    diet_max, diet_p50, diet_p90, diet_p99
+                     (distribution of the diet trait over living slots,
+                     stage 12.5: diet_max is the ">= 1 predator alive"
+                     gauge, recorded every tick; the percentiles are
+                     sampled with genome_dist and forward-filled; all
+                     read 0 when no creatures are alive)
     genome_dist   (sampled genetic diversity, see below)
     n_species, barrier, matings_valid                       (stage 12;
         sampled every ``cluster_every`` ticks and forward-filled — see below)
@@ -54,6 +64,9 @@ INT_COLUMNS = (
     "deaths_famine",
     "deaths_age",
     "deaths_predation",
+    "bite_herb",
+    "bite_omni",
+    "bite_pred",
     "n_herbivore",
     "n_omnivore",
     "n_predator",
@@ -70,6 +83,11 @@ FLOAT_COLUMNS = (
     "vision_std",
     "diet_mean",
     "diet_std",
+    "diet_max",
+    "diet_p50",
+    "diet_p90",
+    "diet_p99",
+    "meat_eaten",
     "genome_dist",
     "n_species",
     "barrier",
@@ -123,7 +141,10 @@ class StatsRecorder:
             for name in COLUMNS
         }
         self._prev_cum = np.zeros(4, dtype=np.int64)  # famine/age/predation/births
+        self._prev_meat = np.float64(0.0)  # cumulative meat_eaten delta baseline
+        self._prev_bite = np.zeros(3, dtype=np.int64)  # bite_by_diet baseline
         self._last_dist = np.float32(0.0)
+        self._last_diet_p = (np.float32(0.0), np.float32(0.0), np.float32(0.0))
         self._last_n_species = np.float32(0.0)
         self._last_barrier = np.float32(0.0)
         self._last_matings_valid = 0
@@ -151,6 +172,21 @@ class StatsRecorder:
     def _genome_scales(self, world: World) -> np.ndarray:
         """Per-gene spawn scales so distances mix dimensionless genes."""
         return genome_scales(world.config)
+
+    def _diet_percentiles(self, world: World) -> tuple[np.float32, np.float32, np.float32]:
+        """p50/p90/p99 of the diet trait over living slots (stage 12.5).
+
+        Computed on ``sample_every`` ticks (same cadence as genome_dist) and
+        forward-filled in ``record``; reads (0, 0, 0) when nothing is alive.
+        The three values bracket the "how far has diet climbed" question that
+        diet_max alone (a single extreme order statistic) cannot answer.
+        """
+        alive = np.flatnonzero(world.alive)
+        if alive.size == 0:
+            return np.float32(0.0), np.float32(0.0), np.float32(0.0)
+        diet = world.genome[alive, world.config.brain_params + 3]
+        p50, p90, p99 = np.percentile(diet, (50.0, 90.0, 99.0))
+        return np.float32(p50), np.float32(p90), np.float32(p99)
 
     def _genome_dist(self, world: World) -> np.float32:
         """RMS pairwise genome distance over a deterministic living sample.
@@ -196,12 +232,14 @@ class StatsRecorder:
             cols["n_herbivore"][i] = np.int32(np.count_nonzero(diet_labels == 0))
             cols["n_omnivore"][i] = np.int32(np.count_nonzero(diet_labels == 1))
             cols["n_predator"][i] = np.int32(np.count_nonzero(diet_labels == 2))
+            cols["diet_max"][i] = np.float32(traits[:, 3].max())
         else:
             cols["mean_energy"][i] = 0.0
             cols["mean_age"][i] = 0.0
             cols["n_herbivore"][i] = 0
             cols["n_omnivore"][i] = 0
             cols["n_predator"][i] = 0
+            cols["diet_max"][i] = 0.0
             means = stds = np.zeros(4, dtype=np.float32)
         for k, trait in enumerate(("speed", "size", "vision", "diet")):
             cols[f"{trait}_mean"][i] = np.float32(means[k])
@@ -213,10 +251,19 @@ class StatsRecorder:
                                   "deaths_predation")):
             cols[name][i] = np.int32(cum[k] - self._prev_cum[k])
             self._prev_cum[k] = cum[k]
+        cols["meat_eaten"][i] = np.float32(world.meat_eaten - self._prev_meat)
+        self._prev_meat = np.float64(world.meat_eaten)
+        for k, name in enumerate(("bite_herb", "bite_omni", "bite_pred")):
+            cols[name][i] = np.int32(world.bite_by_diet[k] - self._prev_bite[k])
+            self._prev_bite[k] = world.bite_by_diet[k]
 
         if i == 0 or world.tick % self.sample_every == 0:
             self._last_dist = self._genome_dist(world)
+            self._last_diet_p = self._diet_percentiles(world)
         cols["genome_dist"][i] = self._last_dist
+        cols["diet_p50"][i] = self._last_diet_p[0]
+        cols["diet_p90"][i] = self._last_diet_p[1]
+        cols["diet_p99"][i] = self._last_diet_p[2]
 
         if i == 0 or world.tick % self.cluster_every == 0:
             self._sample_species(world)

@@ -1,0 +1,13 @@
+# Predation context for the proto-culture stages (13+).
+#
+# Stage 12.5 (experiments/predator_survival) showed that with Config-only
+# levers the predation ratchet breaks: bite_rate=12 plus a wider contact
+# radius ("reach" variant) yields ~400 predation deaths/run and diet_max
+# up to 0.495, while the default (bite_rate=4, contact_range=1.5) yields
+# ~4 deaths/run. Defaults in primordia/config.py are left untouched so
+# every pre-12.5 experiment reproduces bit-for-bit; stages 13+ load this
+# file to work on a world where being bitten is a real, frequent risk.
+#
+# Usage:  python run.py --config configs/proto_culture.toml ...
+bite_rate = 12.0
+contact_range = 2.5

@@ -40,6 +40,8 @@ def test_dtypes_and_shapes() -> None:
     assert w.terrain.shape == w.food.shape
     assert w.meat.dtype == np.float32
     assert w.meat.shape == w.food.shape
+    assert w.bite_by_diet.shape == (3,) and w.bite_by_diet.dtype == np.int64
+    assert int(w.bite_by_diet.sum()) == 0
     assert w.alive_count == cfg.initial_creatures
     assert w.alive_count + w.free_count == n
 

@@ -55,6 +55,25 @@ def test_diet_zero_cannot_drain() -> None:
     _place(w, v, 501.0, 500.0, 50.0, diet=0.5)  # meaty, but mouth shut (gate 0)
     _bite(w)
     assert w.energy[a] == 10.0 and w.energy[v] == 50.0
+    assert int(w.bite_by_diet.sum()) == 0  # stage 12.5: no bite, no count
+
+
+def test_bite_attributed_to_attacker_diet_class() -> None:
+    """Stage 12.5: takes are counted in the attacker's herb/omn/pred bucket."""
+    cfg = Config(max_creatures=8, initial_creatures=2)
+    w = World(cfg, seed=0)
+    a, v = np.flatnonzero(w.alive)
+    _place(w, a, 500.0, 500.0, 10.0, diet=0.9, gate=1.0)  # predator class
+    _place(w, v, 501.0, 500.0, 50.0)
+    _bite(w)
+    assert np.array_equal(w.bite_by_diet, np.array([0, 0, 1]))
+
+    w2 = World(cfg, seed=0)
+    a2, v2 = np.flatnonzero(w2.alive)
+    _place(w2, a2, 500.0, 500.0, 10.0, diet=0.2, gate=1.0)  # herbivore class
+    _place(w2, v2, 501.0, 500.0, 50.0)
+    _bite(w2)
+    assert np.array_equal(w2.bite_by_diet, np.array([1, 0, 0]))
 
 
 def test_gate_zero_cannot_drain() -> None:
