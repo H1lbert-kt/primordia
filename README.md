@@ -62,8 +62,10 @@ limitations in each experiment's README.
 > stage 11 switched to sexual reproduction, added senescence and carrion
 > (30 inputs, `FORMAT_VERSION 4`), stage 12 widened the genealogy log
 > with the mating partner and added the species/barrier stats columns
-> (`FORMAT_VERSION 5`), and stage 13 wired the common signal channel
-> (33 inputs, a 4th brain output, `FORMAT_VERSION 6`). The experiment
+> (`FORMAT_VERSION 5`), stage 13 wired the common signal channel
+> (33 inputs, a 4th brain output, `FORMAT_VERSION 6`), and stage 14 made
+> that channel diffuse — a Jacobi pass spreads the field into trails
+> (config-only, `FORMAT_VERSION` stays 6). The experiment
 > scripts pin the old regime
 > off via `STAGE8_BASE` so the *regime* is preserved — but reruns on current
 > HEAD use the sexual dynamics; the original asexual runs stay in each
@@ -172,14 +174,16 @@ the whole scene dims with the day/night cycle shown as `light` in the HUD.
 
 Target: ≥ 30 ticks/s at 2000 creatures headless (i5-8265U, no GPU).
 
-| creatures | ticks/s (load 0.8–3.8, stage-13 signal channel active) |
+| creatures | ticks/s (load 0.8–5.6, stage-14 diffusion active) |
 |---|---|
 | 500 | 683–1346 |
-| 2000 | 516–861 |
+| 2000 | 465–861 |
 | 5000 | 162–516 |
 
 Numbers vary 2–4× between processes depending on machine load (this box runs
-a desktop session); compare A/B in the same session. The stage-10 economy
+a desktop session); compare A/B in the same session. The new diffusion
+phase costs ~3% of the tick (72 µs of ~2.3 ms, `bench --profile`). The
+stage-10 economy
 holds different populations than older tables during a 1000-tick bench
 (alive_final 223/597/1203), so they are not directly comparable to earlier
 runs. `python -m primordia.bench [--profile]` reproduces the table.
@@ -217,7 +221,7 @@ primordia/
   config.py   world.py   genome.py   brain.py   sensors.py
   step.py     stats.py   io.py       bench.py   ecology.py
   render/     # pygame viewer + headless GIF recorder (never imported by core)
-tests/        # 143 tests: determinism, invariants, save/load, guards
+tests/        # 153 tests: determinism, invariants, save/load, guards
 experiments/  # one script + README per experiment
 run.py        # CLI: --seed --headless --ticks --load --save --stats
               #      --config --record --screenshot --select
@@ -225,17 +229,21 @@ run.py        # CLI: --seed --headless --ticks --load --save --stats
 
 ## Roadmap status
 
-Stages 1–12 of the plan are implemented: world+food, brain+sensors,
+Stages 1–14 of the plan are implemented: world+food, brain+sensors,
 genome+reproduction, viewer, evolvable predation, stats/plots,
 save/load+genealogy, experiments/demo/publication, the guided-world stage
 (persistent food patches, richer senses, Elman recurrence, a richer
 viewer), the balance stage (food economy recalibrated, turning now costs
 energy, larger sprites), the environment stage (terrain, water,
 day/night light, seasons), the biology stage (sexual reproduction,
-senescence, carrion/smell), and the ecology stage (diet-class gauges,
+senescence, carrion/smell), the ecology stage (diet-class gauges,
 genome clustering, reproductive-barrier metric — no new tick logic,
-measured results in `experiments/ecology/`). The "real world" roadmap
-continues with stage 13–16 (civilization+). Known open
+measured results in `experiments/ecology/`), the signal channel (stage 13:
+a scalar emit gate and smell sensors, no reward), and pheromone diffusion
+(stage 14: the field spreads into trails — physics confirmed in
+`experiments/trails/`, interpretation still null at 10k). The "real
+world" roadmap continues with stage 15–16 (civilization+: tag/color,
+donation). Known open
 problems are documented above (predation still a trickle, creatures still
 circle) rather than hidden.
 

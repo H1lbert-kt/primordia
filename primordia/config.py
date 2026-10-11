@@ -154,8 +154,9 @@ class Config:
     # A creature may deposit signal on its own cell (emit gate, output 3)
     # and smell the sum over the cheiro window. The tick never rewards
     # communicating — whether anyone uses the channel is an experiment
-    # question, not a rule. No diffusion yet: the field only decays
-    # geometrically (diffusion is stage 14's pheromone).
+    # question, not a rule. Stage 14 (pheromone): each tick the field also
+    # spreads over its 4 toroidal neighbors (Jacobi pass) before the
+    # sources emit, turning point deposits into extended trails.
     # Default signal_emit_cost is 0: the emit gate is a sigmoid that never
     # reaches exactly 0, so a nonzero default would tax every creature
     # ~cost/2 per tick and silently change the whole economy. The cost is
@@ -164,6 +165,10 @@ class Config:
     emit_rate: float = 1.0  # signal units deposited per tick at gate=1
     signal_emit_cost: float = 0.0  # energy drained per tick at gate=1
     signal_capacity: float = 1.0  # perception normalizer (like food_capacity)
+    # Jacobi weight: new = old + rate * (N+S+E+W - 4*old). Mass-conserving;
+    # stable only for rate <= 0.25 (the highest Laplacian mode is critically
+    # damped there, 1 + rate*(-4) = 0). 0 disables diffusion exactly.
+    signal_diffuse: float = 0.1
 
     # --- species clustering (stage 12: metric only, never read by the tick) ---
     # Normalized genome distance at or below which two living creatures are
@@ -255,6 +260,8 @@ class Config:
             raise ValueError("signal_emit_cost must be >= 0")
         if self.signal_capacity <= 0.0:
             raise ValueError("signal_capacity must be positive")
+        if not 0.0 <= self.signal_diffuse <= 0.25:
+            raise ValueError("signal_diffuse must be in [0, 0.25]")
         if self.species_threshold <= 0.0:
             raise ValueError("species_threshold must be positive")
         if self.genealogy_capacity < 0:

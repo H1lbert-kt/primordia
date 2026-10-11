@@ -11,6 +11,8 @@ never resized. Array dtypes are part of the module contract:
     food_field (H,W) float32 (local capacity K, stage 9 patches),
     terrain (H,W) float32 (fertility in [0,1], exact 0.0 = water, stage 10),
     meat (H,W) float32 (carrion energy per cell, stage 11),
+    signal (H,W) float32 (scalar channel, stage 13; diffusion scratch
+    signal_buf (H,W) float32 is the stage-14 Jacobi staging buffer),
     cell_counts (H,W) int32,
     cell_diet (H,W) float32, cell_offsets (H*W+1,) int32,
     cell_slots (N,) int32, cell_cursor (H*W,) int32 scratch,
@@ -18,7 +20,7 @@ never resized. Array dtypes are part of the module contract:
     ray_unit (n_rays,2) float32,
     sensor_buf (N, input_dim) float32, hidden_buf (N, hidden) float32,
     hidden_prev (N, hidden) float32,   # Elman state: last tick's hidden (saved)
-    actions (N, 3) float32   # scratch buffers, zeroed once, reused every tick
+    actions (N, 4) float32   # scratch buffers, zeroed once, reused every tick
 
 ``creature_id`` is a monotonic birth id (``next_id`` counts up); dead slots
 keep their stale id, so every lookup must also filter ``alive``.
@@ -151,6 +153,10 @@ class World:
         # Emission deposits here; decay_signal bleeds it; the tick never
         # reads it back into energy (it is information, not food).
         self.signal = np.zeros((gh, gw), dtype=np.float32)
+        # Scratch for the stage-14 Jacobi diffusion pass: written by the
+        # kernel, copied back over signal right after (copy, not swap —
+        # references held to self.signal stay valid). Never reallocated.
+        self.signal_buf = np.zeros((gh, gw), dtype=np.float32)
         self.cell_counts = np.zeros((gh, gw), dtype=np.int32)
         self.cell_diet = np.zeros((gh, gw), dtype=np.float32)
         n_cells = gh * gw

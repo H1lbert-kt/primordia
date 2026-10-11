@@ -12,29 +12,33 @@ profiler in ``bench``):
        tick, stage 11 — nutrients are borrowed, not stored)
     3. decay signal     (parallel over cells; signal loses signal_decay per
        tick, stage 13 — a broadcast is information, it fades)
-    4. age + metabolize (parallel over slots, alive only; energy drains by
+    4. diffuse signal   (parallel over cells; Jacobi 5-point pass over the
+       4 toroidal neighbors, stage 14 — pheromone spreads before this
+       tick's sources emit, so a deposit is picked up from the *next*
+       tick onward)
+    5. age + metabolize (parallel over slots, alive only; energy drains by
        metabolic_cost * wear plus move_cost * |vel|^2, wear =
        exp(senescence_rate * age), stage 11)
-    5. perceive         (parallel: rays + smells + internal -> sensor_buf;
+    6. perceive         (parallel: rays + smells + internal -> sensor_buf;
        ray reach also divided by wear)
-    6. think            (parallel: MLP forward -> hidden_buf, raw actions)
-    7. apply actions    (parallel: accel/turn -> vel/angle, eat gate, emit
+    7. think            (parallel: MLP forward -> hidden_buf, raw actions)
+    8. apply actions    (parallel: accel/turn -> vel/angle, eat gate, emit
         gate; turning drains turn_cost * |radians| — steering is never
         free; top speed divided by wear)
-    8. emit signal      (serial: own-cell deposit of emit_rate * gate,
+    9. emit signal      (serial: own-cell deposit of emit_rate * gate,
         drained from energy at signal_emit_cost * gate, stage 13 — the
         deposit is only visible to perceive from the *next* tick, since
         perceive already ran; the contract is deliberate, never reordered)
-    9. eat              (serial: shared cells; food first, then carrion;
+    10. eat             (serial: shared cells; food first, then carrion;
         extraction * gate)
-    10. bite             (serial: contact predation; gate * diet budget, energy
+    11. bite            (serial: contact predation; gate * diet budget, energy
        transfer at bite_efficiency, the dissipating share lands as carrion,
        prey at 0 energy is killed here and counted as predation)
-    11. integrate motion + wrap borders (parallel, alive only)
-    12. deaths          (serial: kill, deposit leftover body energy as carrion,
+    12. integrate motion + wrap borders (parallel, alive only)
+    13. deaths          (serial: kill, deposit leftover body energy as carrion,
        zero energy, push slot to free-list)
-    13. reproduce       (serial: energy >= threshold -> nearest partner within
-       mate_range -> child; uses the slots freed in phases 9 and 12;
+    14. reproduce       (serial: energy >= threshold -> nearest partner within
+       mate_range -> child; uses the slots freed in phases 10 and 13;
        newborns skip perceive/think until the next tick)
 
 Perception uses positions from the start of the tick, movement is applied
@@ -132,11 +136,52 @@ def _decay_meat(meat: np.ndarray, rate: np.float32) -> None:
 
 @njit(cache=True, parallel=True)
 def _decay_signal(signal: np.ndarray, rate: np.float32) -> None:
-    """Signal fades by ``signal_decay`` per tick (stage 13 — no diffusion
-    yet; stage 14's pheromone will add the Jacobi pass)."""
+    """Signal fades by ``signal_decay`` per tick (stage 13; the Jacobi
+    spread of stage 14 runs right after this phase)."""
     for i in prange(signal.shape[0]):
         for j in range(signal.shape[1]):
             signal[i, j] = signal[i, j] * (np.float32(1.0) - rate)
+
+
+@njit(cache=True, parallel=True)
+def _diffuse_signal(
+    signal: np.ndarray, scratch: np.ndarray, rate: np.float32
+) -> None:
+    """Jacobi pass: the field spreads to its 4 toroidal neighbors (stage 14).
+
+    ``scratch[i,j] = signal[i,j] + rate * (N + S + E + W - 4*signal[i,j])``.
+    Over a torus every edge pair transfers ``rate * value`` between cells,
+    so the pass conserves total mass exactly (up to float rounding); the
+    filter is stable for ``rate <= 0.25`` (the highest Laplacian mode is
+    critically damped there — Config validates the bound). Rows are
+    independent; reading only ``signal`` and writing only ``scratch``
+    keeps the prange deterministic. The caller copies ``scratch`` back
+    over ``signal`` (copy, not swap — held references stay valid).
+    """
+    gh = signal.shape[0]
+    gw = signal.shape[1]
+    for i in prange(gh):
+        im = i - 1
+        if im < 0:
+            im = gh - 1
+        ip = i + 1
+        if ip >= gh:
+            ip = 0
+        for j in range(gw):
+            jm = j - 1
+            if jm < 0:
+                jm = gw - 1
+            jp = j + 1
+            if jp >= gw:
+                jp = 0
+            lap = (
+                signal[im, j]
+                + signal[ip, j]
+                + signal[i, jm]
+                + signal[i, jp]
+                - np.float32(4.0) * signal[i, j]
+            )
+            scratch[i, j] = signal[i, j] + rate * lap
 
 
 @njit(cache=True)
@@ -341,6 +386,20 @@ def phase_decay_signal(world: World) -> None:
     cfg = world.config
     if cfg.signal_decay > 0.0:
         _decay_signal(world.signal, np.float32(cfg.signal_decay))
+
+
+def phase_diffuse_signal(world: World) -> None:
+    """Stage 14 pheromone: one Jacobi spread step over the signal field.
+
+    Runs right after decay so decay and diffusion evolve the existing
+    field together; the tick's own deposits (emit) come later and are
+    only spread by the *next* tick's pass. ``signal_diffuse = 0`` is an
+    exact no-op.
+    """
+    cfg = world.config
+    if cfg.signal_diffuse > 0.0:
+        _diffuse_signal(world.signal, world.signal_buf, np.float32(cfg.signal_diffuse))
+        np.copyto(world.signal, world.signal_buf)
 
 
 def phase_age_and_metabolize(world: World) -> None:
@@ -738,6 +797,7 @@ PHASES = (
     ("grow_food", phase_grow_food),
     ("decay_meat", phase_decay_meat),
     ("decay_signal", phase_decay_signal),
+    ("diffuse_signal", phase_diffuse_signal),
     ("age_metabolize", phase_age_and_metabolize),
     ("perceive", phase_perceive),
     ("think", phase_think),

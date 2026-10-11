@@ -13,6 +13,9 @@ one row per recorded tick in pre-allocated int32/float32 columns:
                       no living creature opened the emit gate)
     signal_mass      (current sum of the signal field, gauge every tick:
                       mass at equilibrium is deposit_rate / signal_decay)
+    signal_cells     (cells above 1% of signal_capacity, gauge every tick:
+                      the trail's *area* — a point deposit scores ~1 cell,
+                      diffusion spreads it; stage 14 pheromone metric)
     emit_mean        (mean emit-gate fraction over living creatures, from
                       the last think's logits — reads 0 when nothing lives)
     bite_herb, bite_omni, bite_pred
@@ -97,12 +100,18 @@ FLOAT_COLUMNS = (
     "meat_eaten",
     "signal_emitted",
     "signal_mass",
+    "signal_cells",
     "emit_mean",
     "genome_dist",
     "n_species",
     "barrier",
 )
 COLUMNS = INT_COLUMNS + FLOAT_COLUMNS
+
+# Measurement floor for the signal_cells gauge: cells count as "trail" only
+# above 1% of signal_capacity. Purely an observation threshold — the tick
+# never reads it; sensitivity is documented in experiments/trails/README.
+_SIGNAL_EPS = 0.01
 
 
 @dataclass(frozen=True)
@@ -275,6 +284,13 @@ class StatsRecorder:
         # full-field sum: 40k float32 adds (~40 µs), cheap next to record's
         # existing trait means; the mass shows whether the field is alive
         cols["signal_mass"][i] = np.float32(world.signal.sum(dtype=np.float64))
+        # trail area (stage 14): count over the same 40k cells; the point
+        # vs extended-structure distinction the physics actually delivers
+        cols["signal_cells"][i] = np.float32(
+            np.count_nonzero(
+                world.signal > _SIGNAL_EPS * world.config.signal_capacity
+            )
+        )
         for k, name in enumerate(("bite_herb", "bite_omni", "bite_pred")):
             cols[name][i] = np.int32(world.bite_by_diet[k] - self._prev_bite[k])
             self._prev_bite[k] = world.bite_by_diet[k]

@@ -304,7 +304,8 @@ def test_load_npz_without_ecology_columns() -> None:
                              "diet_max", "meat_eaten",
                              "diet_p50", "diet_p90", "diet_p99",
                              "bite_herb", "bite_omni", "bite_pred",
-                             "signal_emitted", "signal_mass", "emit_mean")]
+                             "signal_emitted", "signal_mass", "signal_cells",
+                             "emit_mean")]
     payload = {name: rec.to_dict()[name] for name in old_cols}
     payload["columns"] = np.array(old_cols)
     payload["seed"] = np.int64(1)
@@ -462,3 +463,10 @@ def test_signal_columns_match_world() -> None:
         float(w.signal.sum(dtype=np.float64)), rel=1e-5
     )
     assert np.all((data["emit_mean"] >= 0.0) & (data["emit_mean"] <= 1.0))
+    # signal_cells is the trail area: 0.01*capacity floor, bounded by H*W
+    # and matching a recount of the final field (stage 14 gauge)
+    gh, gw = cfg.grid_shape
+    assert np.all((data["signal_cells"] >= 0.0) & (data["signal_cells"] <= gh * gw))
+    assert float(data["signal_cells"][-1]) == float(
+        np.count_nonzero(w.signal > 0.01 * cfg.signal_capacity)
+    )

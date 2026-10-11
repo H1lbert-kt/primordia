@@ -14,8 +14,56 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   README principal em **inglês**.
 
 ## Estado atual do repositório (verificado em 2026-10-11)
-- **Etapa 13 ("canal de sinais") implementada, commit pendente de `/cp`:**
-  canal comum escalar **sem recompensa** (princípio 1 intocado): campo
+- **Etapa 14 ("feromônio/difusão") implementada, commit pendente de `/cp`:**
+  Jacobi 5 pontos sobre o campo `signal` com wrap toroidal
+  (`new = old + rate·(N+S+E+W−4·old)`), conserva massa por construção e é
+  estável só p/ `rate ≤ 0.25` (validado em `__post_init__`). Novo
+  `Config.signal_diffuse = 0.1` **ligado por default** (decisão do usuário:
+  física livre, ao contrário do emit cost) e 0 = no-op exato (controle do
+  experimento). Kernel escreve no novo scratch `World.signal_buf (H,W)
+  float32` e a fase copia de volta (`np.copyto` — cópia, não swap, para
+  referências de `signal` ficarem válidas). Fase nova `diffuse_signal` logo
+  **após `decay_signal`** (fases 14→15; docstring do tick renumerada):
+  decay+difusão evoluem o campo junta, as fontes (emit) ficam depois —
+  contrato "emit só visível no tick seguinte" intocado. **`FORMAT_VERSION`
+  fica 6** (sem array novo no save; precedente = campos só-Config da 9.5;
+  caveat: continuar save da 13 aplica o default 0.1 — muda a física no
+  meio da run, documentado). Layout **inalterado 33 in / 4 out / 484 / 488**
+  (difusão pura, sem sensores novos). **Stats novo:** `signal_cells` =
+  nº de células > `0.01·signal_capacity` (área da trilha; `_SIGNAL_EPS`
+  constante de medida em `stats.py`, fora do tick; `plot.py` intocado).
+  Docstring de `world.py` corrigida (`signal`/`signal_buf` ausentes e
+  `actions (N,3)` defasado desde a 13 → agora (N,4)). **Testes: 153
+  passed** — `tests/test_diffusion.py` novo (conservação de massa, spread
+  com wrap, estabilidade 100 passos a 0.25, no-op em 0, ordem de fases,
+  validação, determinismo e continuação save/load bit-a-bit com difusão
+  forte a 0.25).
+- **Experimento `experiments/trails/` (etapa 14)** — duas fases sobre
+  `proto_culture.toml`, seeds 42/7/13. **Fase price** (6k,
+  `signal_diffuse=0` p/ isolar a economia): custo {0, 0.01, 0.05, 0.15} →
+  pop final 219/212/209/99 com **3/3 sobreviventes em todos**, `emit_mean`
+  0.717→0.579 e emitido −77% (seleção age no gate). Regra estrita do plano
+  escolhia **0.15** (maior custo sobrevivente), mas terminou 6k a 45% do
+  controle (min 71, descendente) com risco real de extinção a 10k —
+  **decisão do usuário: gate a 0.05** (pop 209 ≈ controle 219, seleção já
+  visível). **Fase gate** (10k, preço 0.05; nodiff 0 / mid 0.1 / fast 0.2):
+  duro ✓ (todas 9 runs vivas, min 290 → **janela de preço da 13 fechada:
+  0.05 é viável até 10k**); física ✓ `signal_cells` final 7740 → 15439 →
+  16529 (~2×; a meio do run ~3.4×; nodiff nunca passa 11.7k células = 29%
+  do grid, mid/fast atingem 34–37k = 85–94% do grid); comportamento
+  **nulo como previsto a priori** (pops 974/859/900 e predação 469/417/485
+  com bandas sobrepostas, `diet_max` misturado). `signal_mass` difere entre
+  variantes (4.4k–5.6k) pela *fonte* (população × gate), não por criação
+  de massa — a conservação é teste unitário. **Bench:** fase
+  `diffuse_signal` = **72 µs ≈ 3.2%** do tick (1523→2269 µs sum, profile);
+  completo (3 amostras, load 3.4–5.6): **794–1106 / 465–491 / 166–303** a
+  500/2000/5000 — piso 30 @N=2000 com 15× (faixa 13 era 683–1346/516–861/
+  162–516 em load menor; diferença = ruído de carga, share da fase medido
+  no profile). README principal: 153 testes, tabela de bench, roadmap
+  1–14 + nota de reprodutibilidade da 14. Próximo passo do usuário: `/cp`,
+  depois planejar a etapa 15 (tag/cor).
+- **Etapa 13 ("canal de sinais") concluída, commitada em
+  `origin/master` (`e0fb14b`):** canal comum escalar **sem recompensa** (princípio 1 intocado): campo
   `signal (H,W) float32` com decaimento geométrico **local** (sem difusão —
   essa é a etapa 14), gate de emissão = 4ª saída do cérebro (`N_OUTPUTS`
   3→4, mesmo scaled-sigmoid do eat gate), depósito `emit_rate·gate` na
@@ -55,9 +103,9 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   @N=2000 com 17–29×, sem regressão vs 12.5 (1133/788/310; a diferença é
   ruído de carga, o tick novo custa ~2 leituras por célula no smell). `plot.py` ganha
   fig `signal.png` com guard por presença de `signal_emitted`.
-  Próximo passo do usuário: `/cp`, depois etapa 14 (feromônio/difusão)
-  em `.opencode/plans/etapa-13-sinais.md` (Jacobi/difusão) — mas antes,
-  calibrar o preço do sinal se 14+ for usar o canal.
+  Seguiu a etapa 14 (difusão, plano `.opencode/plans/etapa-14-feromonio.md`);
+  o sweep de preço virou a fase "price" de `experiments/trails/` (0.05
+  viável a 10k), como o "calibrar antes da 14+" previa.
 - **Etapa 12.5 ("ratchet de predação") concluída, commitada em
   `origin/master` (`9646ab5`):** ratchet **quebra com Config só** (nada de
   tick novo além de contadores de diagnóstico). `Config.bite_rate`/`contact_range`/`bite_efficiency`
