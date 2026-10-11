@@ -30,7 +30,7 @@ def test_dtypes_and_shapes() -> None:
     assert w.species_id.dtype == np.int32
     assert w.parent_id.dtype == np.int32
     assert w.creature_id.dtype == np.int32
-    assert w.genealogy.shape == (cfg.genealogy_capacity, 3)
+    assert w.genealogy.shape == (cfg.genealogy_capacity, 4)
     assert w.genealogy.dtype == np.int32
     assert w.hidden_prev.shape == (n, cfg.hidden_size)
     assert w.hidden_prev.dtype == np.float32

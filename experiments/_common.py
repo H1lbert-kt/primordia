@@ -60,9 +60,19 @@ STAGE8_BASE = {
 
 
 def run_variant(
-    cfg: Config, seed: int, ticks: int, npz: Path, force: bool = False
+    cfg: Config | dict,
+    seed: int,
+    ticks: int,
+    npz: Path,
+    force: bool = False,
+    cluster_every: int = 100,
 ) -> StatsHistory:
     """Run one (config, seed) variant for ``ticks`` ticks, recording stats.
+
+    ``cfg`` is either a built ``Config`` or a plain overrides dict merged
+    onto the defaults. ``cluster_every`` is the sampling period of the
+    stage-12 species columns (``n_species``/``barrier``/``matings_valid``);
+    keep it fixed per experiment so cached npz files stay comparable.
 
     Returns the history from ``npz`` (already on disk — it doubles as the
     cache, so an interrupted batch resumes where it stopped unless
@@ -75,7 +85,9 @@ def run_variant(
             return history
         print(f"  seed={seed}: stale ({len(history)} != {ticks} ticks), rerunning")
 
-    rec = StatsRecorder(capacity=ticks)
+    if not isinstance(cfg, Config):
+        cfg = Config(**cfg)
+    rec = StatsRecorder(capacity=ticks, cluster_every=cluster_every)
     w = World(cfg, seed=seed)
     start = time.perf_counter()
     for _ in range(ticks):

@@ -14,7 +14,7 @@ never resized. Array dtypes are part of the module contract:
     cell_counts (H,W) int32,
     cell_diet (H,W) float32, cell_offsets (H*W+1,) int32,
     cell_slots (N,) int32, cell_cursor (H*W,) int32 scratch,
-    genealogy (L,3) int32,   # birth log rows (tick, child_id, parent_id)
+    genealogy (L,4) int32,   # birth log rows (tick, child_id, parent_id, partner_id)
     ray_unit (n_rays,2) float32,
     sensor_buf (N, input_dim) float32, hidden_buf (N, hidden) float32,
     hidden_prev (N, hidden) float32,   # Elman state: last tick's hidden (saved)
@@ -179,7 +179,7 @@ class World:
         # Genealogy (stage 7): birth-id allocator plus the pre-allocated
         # birth log; _reproduce writes rows through the cursor in-place.
         self.next_id = 0
-        self.genealogy = np.zeros((config.genealogy_capacity, 3), dtype=np.int32)
+        self.genealogy = np.zeros((config.genealogy_capacity, 4), dtype=np.int32)
         self.genealogy_used = 0
         self.genealogy_overflow = 0
         self.spawn(config.initial_creatures)

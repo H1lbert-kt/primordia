@@ -5,7 +5,8 @@ descended from a few founder families, how deep does the tree get, and
 when do births happen?
 
 Method: defaults, 3 seeds, 5000 ticks. Each run caches the append-only
-``genealogy`` log (tick, child_id, parent_id) plus the final alive ids in
+``genealogy`` log (tick, child_id, parent_id, partner_id — only the
+initiator is traced) plus the final alive ids in
 ``data/`` (gitignored); analysis traces every living creature back to its
 founder. Output: figure in ``figs/``, summary table on stdout.
 
@@ -80,8 +81,12 @@ def run_lineage(seed: int, ticks: int, npz: Path, force: bool) -> dict:
 
 
 def trace(genealogy: np.ndarray, alive_ids: np.ndarray) -> dict:
-    """Family and depth of every living creature via the parent map."""
-    parent = {int(c): int(p) for _, c, p in genealogy}
+    """Family and depth of every living creature via the parent map.
+
+    The log has 4 columns since stage 12 (tick, child, parent, partner);
+    only the initiator (column 2) defines the traced lineage.
+    """
+    parent = {int(c): int(p) for _, c, p, _partner in genealogy}
     roots, depths = [], []
     for cid in alive_ids:
         node = int(cid)

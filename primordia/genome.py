@@ -121,9 +121,10 @@ def _reproduce(
     No partner -> no birth (no energy is debited, the free list is untouched).
 
     Each child gets a monotonic ``creature_id`` and a ``parent_id`` holding
-    the initiator's creature id (never its slot: slots are recycled and
-    would corrupt the lineage; the partner's id is not logged — documented
-    limitation); the birth is appended to the ``genealogy`` log until it is
+    the initiator's creature id (never its slot: slots are recycled and would
+    corrupt the lineage); the partner's creature id is logged in column 3
+    (stage 12 — both parents are now measurable for the reproductive-barrier
+    metric); the birth is appended to the ``genealogy`` log until it is
     full (then only ``overflow`` grows). RNG draws are the crossover coin
     and the mutation draws, in ascending initiator/gene order.
     """
@@ -274,6 +275,7 @@ def _reproduce(
             genealogy[genealogy_used, 0] = tick
             genealogy[genealogy_used, 1] = child_id
             genealogy[genealogy_used, 2] = creature_id[i]
+            genealogy[genealogy_used, 3] = creature_id[j]
             genealogy_used = genealogy_used + 1
         else:
             genealogy_overflow = genealogy_overflow + 1

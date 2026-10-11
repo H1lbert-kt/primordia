@@ -17,6 +17,7 @@ import numpy as np
 import pygame
 
 from ..cycles import light_level
+from ..ecology import cluster_living
 from ..step import advance
 from ..world import World
 from .camera import Camera
@@ -84,6 +85,12 @@ def run_app(
 
     selected = select_slot if 0 <= select_slot < cfg.max_creatures else -1
     sel_age = int(world.age[selected]) if selected >= 0 else -1
+    # Stage 12: species clustering is O(alive * K) pure-Python, so it is
+    # recomputed every CLUSTER_REFRESH_FRAMES frames and reused in between
+    # (both for the HUD K and the selected creature's cluster label).
+    CLUSTER_REFRESH_FRAMES = 30
+    cluster_k: int | None = None
+    cluster_label_of_slot: np.ndarray | None = None
     paused = False
     speed_index = 0
     follow = selected >= 0  # a preset selection starts tracking its creature
@@ -200,6 +207,12 @@ def run_app(
         render_flashes(overlay, event_tracker.flashes, camera, settings)
         world_surface.blit(overlay, (0, 0))
         draw_overlay(world_surface, world, camera, selected, settings)
+        if frames % CLUSTER_REFRESH_FRAMES == 0:
+            slots, labels = cluster_living(world, cfg.species_threshold)
+            cluster_k = int(np.unique(labels).size) if slots.size else 0
+            lut = np.full(cfg.max_creatures, -1, dtype=np.int32)
+            lut[slots] = labels
+            cluster_label_of_slot = lut
         render_panel(
             panel_surface,
             world,
@@ -212,6 +225,8 @@ def run_app(
                 seed=seed,
                 alive_hist=sparks.alive,
                 energy_hist=sparks.energy,
+                species_k=cluster_k,
+                cluster_label_of_slot=cluster_label_of_slot,
             ),
             settings,
         )

@@ -120,6 +120,11 @@ def test_child_inherits_state_and_genome() -> None:
     assert np.all(from_parent)
     assert w.age[child] == 0
     assert w.parent_id[child] == w.creature_id[i]  # lineage tracks the initiator
+    # stage 12: both parents are logged so the barrier metric can see them
+    log = w.genealogy[: w.genealogy_used]
+    assert log.shape[1] == 4
+    assert log[-1, 2] == w.creature_id[i]
+    assert log[-1, 3] == w.creature_id[j]
     np.testing.assert_array_equal(w.pos[child], w.pos[i])
     np.testing.assert_array_equal(w.vel[child], 0.0)
     assert w.angle[child] == w.angle[i]

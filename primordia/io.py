@@ -1,9 +1,11 @@
 """Save and load the entire world as a versioned ``.npz`` (stage 7).
 
-Format v4 stores exactly what is needed to continue a run bit-for bit
+Format v5 stores exactly what is needed to continue a run bit-for bit
 (v2 added ``food_field`` and ``hidden_prev``; v3 adds ``terrain``, the
 stage-10 geography; v4 adds ``meat`` and ``meat_eaten``, the stage-11
-carrion cycle; readers reject older versions with a clear message):
+carrion cycle; v5 widens the genealogy log to 4 columns so both parents
+are recorded, the stage-12 reproductive-barrier metric; readers reject
+older versions with a clear message):
 
     format_version  int32 scalar; readers reject other versions
     config_json     Config as JSON (rebuilds every balance parameter)
@@ -17,7 +19,7 @@ carrion cycle; readers reject older versions with a clear message):
     pos vel angle energy age genome species_id parent_id creature_id
     alive free_list food food_field terrain meat hidden_prev
                     the SoA state arrays
-    genealogy       (used, 3) int32 birth log, trimmed to genealogy_used
+    genealogy       (used, 4) int32 birth log, trimmed to genealogy_used
 
 Light and season are deliberately **not** stored: they are pure functions
 of ``tick`` (see ``cycles.py``), which is saved — so a restored world
@@ -48,7 +50,7 @@ from .config import Config
 from .genome import get_numba_rng_state, set_numba_rng_state
 from .world import World
 
-FORMAT_VERSION = 4
+FORMAT_VERSION = 5
 
 _INT_SCALARS = (
     "seed",
@@ -84,7 +86,7 @@ _ARRAYS = (
 
 
 def save_world(world: World, path: str) -> None:
-    """Write the full simulation state to ``path`` (npz, format v4)."""
+    """Write the full simulation state to ``path`` (npz, format v5)."""
     payload: dict[str, np.ndarray] = {
         "format_version": np.int32(FORMAT_VERSION),
         "config_json": np.array(json.dumps(asdict(world.config), sort_keys=True)),

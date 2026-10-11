@@ -110,6 +110,38 @@ def plot_history(history: StatsHistory, out_dir: Path) -> list[Path]:
     ax.set_title(_title(history, f"diversity (genome sampled every {every} ticks)"))
     paths.append(_save(fig, out_dir, "diversity.png"))
 
+    # Stage-12 columns (diet gauges + genome clustering) are only present in
+    # histories recorded on a stage-12+ tree. Older npz files load fine but
+    # lack these keys, so guard instead of crashing.
+    if "n_species" in history.data:
+        fig, axes = plt.subplots(1, 2, figsize=(11, 4), sharex=True)
+        axes[0].stackplot(
+            tick,
+            history["n_herbivore"],
+            history["n_omnivore"],
+            history["n_predator"],
+            labels=("herbivore", "omnivore", "predator"),
+            colors=("tab:green", "tab:orange", "tab:red"),
+            alpha=0.85,
+        )
+        axes[0].set_title("diet classes (gauges)")
+        axes[0].set_xlabel("tick")
+        axes[0].legend(loc="upper left", fontsize=8)
+        axes[1].plot(tick, history["n_species"], color="tab:purple",
+                     label="n_species")
+        axes[1].set_ylabel("clusters", color="tab:purple")
+        axb = axes[1].twinx()
+        axb.plot(tick, history["barrier"], color="tab:brown", alpha=0.7,
+                 label="barrier")
+        axb.set_ylabel("cross-cluster fraction", color="tab:brown")
+        axes[1].set_xlabel("tick")
+        axes[1].grid(alpha=0.3)
+        lines = axes[1].get_lines() + axb.get_lines()
+        axes[1].legend(lines, [ln.get_label() for ln in lines],
+                       loc="upper left", fontsize=8)
+        axes[1].set_title("species clusters and reproductive barrier")
+        paths.append(_save(fig, out_dir, "ecology.png"))
+
     return paths
 
 

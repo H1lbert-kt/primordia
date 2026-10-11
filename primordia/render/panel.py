@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import numpy as np
 import pygame
 
-from ..cycles import light_level
+from ..cycles import light_level, season_multiplier
 from ..sensors import input_groups
 from .settings import Settings
 
@@ -42,6 +42,11 @@ class Hud:
     seed: int
     alive_hist: deque | None = None  # sparkline samples (see SparkTracker)
     energy_hist: deque | None = None
+    # Stage 12: cached species clustering (ecology.cluster_living). The app
+    # refreshes it every ~30 frames; None means "no cache yet" (recorder,
+    # first frames). species_k is the cluster count for the HUD line.
+    species_k: int | None = None
+    cluster_label_of_slot: np.ndarray | None = None  # label per slot, -1 dead
 
 
 def _text(dst: pygame.Surface, size: int, msg: str, x: int, y: int, color) -> int:
@@ -308,10 +313,14 @@ def render_panel(
         )
         cid = int(world.creature_id[slot])
         parent = int(world.parent_id[slot])
+        cluster = "n/a"
+        if hud.cluster_label_of_slot is not None:
+            lab = int(hud.cluster_label_of_slot[slot])
+            cluster = f"#{lab}" if lab >= 0 else "n/a"
         y = _text(
             dst,
             16,
-            f"id #{cid}   parent #{parent}   species {int(world.species_id[slot])}",
+            f"id #{cid}   parent #{parent}   cluster {cluster}",
             x,
             y,
             settings.text_dim,
@@ -328,13 +337,15 @@ def render_panel(
     mean_e = float(world.energy[world.alive].mean()) if alive else 0.0
     meat_total = float(world.meat.sum(dtype=np.float64))
     stats = (
-        f"tick {world.tick}   alive {alive}/{world.config.max_creatures}",
+        f"tick {world.tick}   alive {alive}/{world.config.max_creatures}"
+        f"   species {hud.species_k if hud.species_k is not None else '-'}",
         f"mean energy {mean_e:.1f}   meat {meat_total:.0f}",
         f"births {world.births}   famine {world.deaths_famine}",
         f"age deaths {world.deaths_age}   predation {world.deaths_predation}",
         f"fps {hud.fps:.0f}   sim x{hud.speed}{'  [PAUSED]' if hud.paused else ''}"
         f"{'  [FOLLOW]' if hud.follow else ''}",
-        f"seed {hud.seed}   light {float(light_level(world.config, world.tick)):.2f}",
+        f"seed {hud.seed}   light {float(light_level(world.config, world.tick)):.2f}"
+        f"   season {float(season_multiplier(world.config, world.tick)):.2f}",
     )
     for line in stats:
         y = _text(dst, 16, line, x, y, settings.text)

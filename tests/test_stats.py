@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
+from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
@@ -193,3 +195,122 @@ def test_plot_smoke(tmp_path: Path) -> None:
                  "diversity.png"):
         png = out / name
         assert png.exists() and png.stat().st_size > 0, name
+
+
+def test_diet_gauges_sum_to_alive() -> None:
+    cfg = Config(max_creatures=48, initial_creatures=24)
+    w = World(cfg, seed=5)
+    rec = StatsRecorder(capacity=40, sample_every=10, sample_size=16,
+                        cluster_every=50)
+    for _ in range(30):
+        step.advance(w)
+        rec.record(w)
+    data = rec.to_dict()
+    total = (data["n_herbivore"] + data["n_omnivore"] + data["n_predator"]
+             ).astype(np.int64)
+    assert np.array_equal(total, data["alive"].astype(np.int64))
+
+
+def test_species_columns_forward_fill_between_cluster_ticks() -> None:
+    cfg = Config(max_creatures=48, initial_creatures=24)
+    w = World(cfg, seed=8)
+    rec = StatsRecorder(capacity=40, sample_every=10, sample_size=16,
+                        cluster_every=7)
+    for _ in range(20):
+        step.advance(w)
+        rec.record(w)
+    data = rec.to_dict()
+    n = len(data["tick"])
+    # Recompute cluster ticks exactly as the recorder does (i == 0 first).
+    for i, tick in enumerate(data["tick"]):
+        if i > 0 and tick % 7 != 0:
+            continue
+        j = i + 1
+        while j < n and data["tick"][j] % 7 != 0:
+            assert data["n_species"][j] == data["n_species"][i]
+            assert data["barrier"][j] == data["barrier"][i]
+            j += 1
+    assert np.all(data["barrier"] >= 0.0) and np.all(data["barrier"] <= 1.0)
+    assert np.all(data["n_species"] >= 0.0)
+
+
+def test_barrier_counts_cross_cluster_births() -> None:
+    """Unit-test _sample_species: hand-placed clusters + hand-written log."""
+    cfg = Config(max_creatures=16, initial_creatures=0,
+                 species_threshold=0.5)
+    w = World(cfg, seed=1)
+    slots = w.spawn(3)
+    g = cfg.brain_params
+    w.genome[:] = 0.0  # identical everything...
+    # max_speed trait is normalized by cfg.max_speed=4.0, so a raw 10.0 is a
+    # normalized distance of 2.5, well above species_threshold=0.5 -> 2 clusters.
+    w.genome[slots[2], g] = 10.0
+    w.energy[slots] = 50.0
+    w.tick = 5
+    step.phase_rebuild_counts(w)
+
+    # Cross-cluster birth in the log: parent = cluster-0 creature,
+    # partner = cluster-1 creature (both alive at the sample).
+    child_id = w.next_id
+    w.next_id += 1
+    w.genealogy[0] = (w.tick, child_id, w.creature_id[slots[0]],
+                      w.creature_id[slots[2]])
+    w.genealogy_used = 1
+    w.births = 1
+    rec = StatsRecorder(capacity=4, sample_every=1, sample_size=4,
+                        cluster_every=1)
+    rec.record(w)
+    data = rec.to_dict()
+    assert float(data["n_species"][0]) == 2.0
+    assert int(data["matings_valid"][0]) == 1
+    assert float(data["barrier"][0]) == 1.0
+
+    # Same-cluster birth (both parents in cluster 0) -> barrier 0.
+    rec2 = StatsRecorder(capacity=4, sample_every=1, sample_size=4,
+                         cluster_every=1)
+    w.genealogy[0] = (w.tick, child_id + 1, w.creature_id[slots[0]],
+                      w.creature_id[slots[1]])
+    w.genealogy_used = 1
+    w.births = 1
+    rec2.record(w)
+    data2 = rec2.to_dict()
+    assert int(data2["matings_valid"][0]) == 1
+    assert float(data2["barrier"][0]) == 0.0
+
+    # Dead partner is skipped: not valid, barrier denominator drops to 0.
+    rec3 = StatsRecorder(capacity=4, sample_every=1, sample_size=4,
+                         cluster_every=1)
+    w.genealogy[0] = (w.tick, child_id + 2, w.creature_id[slots[0]],
+                      999999)  # creature id that is not alive
+    w.genealogy_used = 1
+    w.births = 1
+    rec3.record(w)
+    data3 = rec3.to_dict()
+    assert int(data3["matings_valid"][0]) == 0
+    assert float(data3["barrier"][0]) == 0.0
+
+
+def test_load_npz_without_ecology_columns() -> None:
+    """Files saved by stage <= 11 load; new columns are simply absent."""
+    cfg = Config(max_creatures=16, initial_creatures=8)
+    w = World(cfg, seed=1)
+    rec = StatsRecorder(capacity=8, sample_every=2, sample_size=8)
+    for _ in range(4):
+        step.advance(w)
+        rec.record(w)
+    old_cols = [c for c in stats.COLUMNS
+                if c not in ("n_species", "barrier", "matings_valid",
+                             "n_herbivore", "n_omnivore", "n_predator")]
+    payload = {name: rec.to_dict()[name] for name in old_cols}
+    payload["columns"] = np.array(old_cols)
+    payload["seed"] = np.int64(1)
+    payload["sample_every"] = np.int32(2)
+    payload["sample_size"] = np.int32(8)
+    payload["config_json"] = np.array(json.dumps(asdict(cfg), sort_keys=True))
+    path = Path("/tmp") / "stats_old_cols.npz"
+    np.savez(path, **payload)
+
+    loaded = stats.StatsRecorder.load(str(path))
+    assert loaded["alive"].size == 4
+    assert "genome_dist" in loaded.data
+    assert "n_species" not in loaded.data

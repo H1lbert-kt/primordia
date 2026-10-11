@@ -87,3 +87,48 @@ def test_panel_shows_all_sensor_groups(ready_world: World) -> None:
 
     for label, _group in input_groups(ready_world.config):
         assert label in messages, f"sensor group {label!r} not shown in panel"
+
+
+def test_panel_shows_cluster_when_cached(ready_world: World) -> None:
+    """Selected panel shows 'cluster #k' when the app cached labels.
+
+    Without the cache (None, as in the recorder) it shows 'cluster n/a' —
+    neither path may crash or leave the old vestigial 'species 0'.
+    """
+    from primordia.render import panel as P
+    from primordia.render.settings import Settings
+
+    settings = Settings()
+    slot = int(np.flatnonzero(ready_world.alive)[0])
+
+    def collect(hud) -> list[str]:
+        messages: list[str] = []
+        original = P._text
+
+        def spy(dst, size, msg, x, y, color):
+            messages.append(msg)
+            return original(dst, size, msg, x, y, color)
+
+        P._text = spy
+        try:
+            surf = pygame.Surface((settings.panel_width, settings.window_height))
+            P.render_panel(surf, ready_world, slot, hud, settings)
+        finally:
+            P._text = original
+        return messages
+
+    lut = np.full(ready_world.config.max_creatures, -1, dtype=np.int32)
+    lut[slot] = 3
+    with_cache = collect(P.Hud(
+        fps=60.0, speed=1, paused=False, follow=False, seed=42,
+        species_k=5, cluster_label_of_slot=lut,
+    ))
+    without = collect(P.Hud(
+        fps=60.0, speed=1, paused=False, follow=False, seed=42,
+    ))
+
+    assert any("cluster #3" in m for m in with_cache), with_cache
+    assert any("cluster n/a" in m for m in without), without
+    # The inspection line must not keep the vestigial "species 0" id label;
+    # the WORLD HUD's "species K" gauge line is a different, intended string.
+    assert not any("species 0" in m for m in with_cache + without)

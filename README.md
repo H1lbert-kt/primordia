@@ -58,8 +58,10 @@ limitations in each experiment's README.
 > field, the old food economy). Stage 9 changed the brain layout (28 inputs,
 > 10 hidden units, Elman recurrence), stage 9.5 recalibrated the economy,
 > stage 10 added a 29th input (ambient light) plus terrain/day-night/seasons,
-> and stage 11 switched to sexual reproduction, added senescence and carrion
-> (30 inputs, `FORMAT_VERSION 4`). The experiment scripts pin the old regime
+> stage 11 switched to sexual reproduction, added senescence and carrion
+> (30 inputs, `FORMAT_VERSION 4`), and stage 12 widened the genealogy log
+> with the mating partner and added the species/barrier stats columns
+> (`FORMAT_VERSION 5`). The experiment scripts pin the old regime
 > off via `STAGE8_BASE` so the *regime* is preserved — but reruns on current
 > HEAD use the sexual dynamics; the original asexual runs stay in each
 > experiment's gitignored `data/` cache (bit-exact reproduction needs the
@@ -123,13 +125,23 @@ gif.
 relative to a shrinking energy budget), predation first went nonzero: every
 one of 3 seeds × 10k ticks records predation deaths (1–64 per run), and the
 top 1% of evolved diets reach 0.17–0.22. Still a trickle, not a food web —
-the trophic-cascade stage (12) is where this gets a real test.
+and stage 12 (below) confirms the trickle never became a pyramid, while
+showing it *does* shape genome isolation.
 
 *Stage 10 update:* denser populations at the new food economy raise encounter
 rates — predation over 3 seeds × 10k goes 1926 / 2 / 1 deaths (seed 42:
 essentially zero until tick 7k, then an omnivore outbreak during the final
 boom at the cap). High variance, still no obligate predator above diet 0.5
 alive at any snapshot — same open problem, bigger numbers.
+
+*Stage 12 update:* measuring rather than tuning, the trophic pyramid is
+still flat (≥99.9% of every run is herbivore, 0 predators alive, famine
+dominates deaths), but the *structure* question the stage asked did answer:
+genome clusters grow 1 → ~18 over 10k ticks and a small, sustained
+reproductive barrier emerges (mean cross-cluster mating fraction 0.100 with
+meat reward vs 0.057 with `bite_efficiency = 0`). Predation remains 1.5% of
+all deaths — a trickle with a measurable downstream effect on isolation,
+not a food web. See `experiments/ecology/`.
 
 ![diet](experiments/predation/figs/diet.png)
 
@@ -200,9 +212,9 @@ python run.py --headless --ticks 1000 --config overrides.example.json
 ```
 primordia/
   config.py   world.py   genome.py   brain.py   sensors.py
-  step.py     stats.py   io.py       bench.py
+  step.py     stats.py   io.py       bench.py   ecology.py
   render/     # pygame viewer + headless GIF recorder (never imported by core)
-tests/        # 109 tests: determinism, invariants, save/load, guards
+tests/        # 125 tests: determinism, invariants, save/load, guards
 experiments/  # one script + README per experiment
 run.py        # CLI: --seed --headless --ticks --load --save --stats
               #      --config --record --screenshot --select
@@ -210,15 +222,17 @@ run.py        # CLI: --seed --headless --ticks --load --save --stats
 
 ## Roadmap status
 
-Stages 1–11 of the plan are implemented: world+food, brain+sensors,
+Stages 1–12 of the plan are implemented: world+food, brain+sensors,
 genome+reproduction, viewer, evolvable predation, stats/plots,
 save/load+genealogy, experiments/demo/publication, the guided-world stage
 (persistent food patches, richer senses, Elman recurrence, a richer
 viewer), the balance stage (food economy recalibrated, turning now costs
 energy, larger sprites), the environment stage (terrain, water,
-day/night light, seasons), and the biology stage (sexual reproduction,
-senescence, carrion/smell). The "real world" roadmap continues with
-stage 12 (ecology), 13–16 (civilization+). Known open
+day/night light, seasons), the biology stage (sexual reproduction,
+senescence, carrion/smell), and the ecology stage (diet-class gauges,
+genome clustering, reproductive-barrier metric — no new tick logic,
+measured results in `experiments/ecology/`). The "real world" roadmap
+continues with stage 13–16 (civilization+). Known open
 problems are documented above (predation still a trickle, creatures still
 circle) rather than hidden.
 

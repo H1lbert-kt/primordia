@@ -13,9 +13,55 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
 - Código, identificadores, comentários, docstrings, mensagens de commit e
   README principal em **inglês**.
 
-## Estado atual do repositório (verificado em 2026-10-09)
-- **Etapa 11 ("biologia") concluída (2026-10-09, commit pendente
-  de `/cp`):** plano em `.opencode/plans/etapa-11-biologia.md` (fases A–F);
+## Estado atual do repositório (verificado em 2026-10-10)
+- **Etapa 12 ("ecologia") concluída (2026-10-10, commit pendente
+  de `/cp`):** plano em `.opencode/plans/etapa-12-ecologia.md` (fases A–F).
+  **Sem código de tick novo** — só métricas fora do tick, para medir o que
+  10+11 deveriam produzir. `primordia/ecology.py` (novo): `classify_diets`
+  (herbívora diet<0.33 / onívora / predadora diet>0.66, **só para contar,
+  nunca regra**), `genome_scales` (dedup de `_genome_scales` do stats),
+  `cluster_living` (greedy-leader determinístico por slot ascendente,
+  ≤ threshold inclusivo, empate → líder menor; **não** single-linkage).
+  `Config.species_threshold` (default **10.0**, calibrado: histograma de
+  distâncias pareadas a 3000 ticks é bimodal, mediana ~7.5 com cauda até
+  ~370 → K estável em `[8,50]`, caindo 5–15; 1.0 daria K≈N). Colunas novas
+  no `StatsRecorder` (gauges **todo tick**: `n_herbivore`/`n_omnivore`/
+  `n_predator`; amostradas a cada `cluster_every=100` e forward-filled:
+  `n_species`, `barrier`, `matings_valid`). `barrier` = fração de nascimentos
+  desde a última amostra com **os dois pais ainda vivos** e clusters
+  diferentes (viés documentado: genitor de vida curta some do denominador —
+  lower bound); `matings_valid` é o denominador exposto. **`partner_id` no
+  log de genealógia: `genealogy` (L,3)→(L,4)**, `io FORMAT_VERSION = 4→5`
+  (v1–v4 → ValueError). **Decisões do usuário:** (1) `partner_id` no log,
+  (2) HUD count-only (sem colorir sprites por cluster; sprites mantêm
+  matiz=dieta; sem GIF novo), (3) experimento 10k × 3 seeds. HUD: linha
+  `species K` embutida na linha `tick/alive` + `season S(t)` na linha
+  `seed/light` (**sem linha nova — `test_panel_fits_window` estouraria
+  720 px**); app cacheia `cluster_living` a cada **30 frames** (O(N·K)
+  Python, ~4–6 ms @N≈900, K=1); painel selecionado mostra **`cluster #k`**
+  no lugar do vestigial `species 0` (nunca mais 0; `species_id` continua no
+  mundo/save). **Experimento `experiments/ecology/`** (default vs
+  `no_predation` = `bite_efficiency=0`, 3 seeds, 10k, figuras
+  clusters/barrier/diet_classes/cross_corr + README com números reais):
+  pop final 1703/1330, `n_species` 1→~18 monotônica, **barrier média
+  0.100 (default) vs 0.057 (sem recompensa de carne)**, barrier>0 em
+  85%/70% dos ticks pós-meio, `genome_dist` final 5.59/4.22, predação
+  43/13 mortes (1.49%/0.46% do total; fome domina ~2800/run), troféu
+  trófico ainda plano (≥99.9% herbívoro, 0 predadores em 10k). Resultado
+  honesto: **especiação-lite real e mensurável, não requer predação
+  (clusters formam sem carne) mas a recompensa de carne ~duplica a
+  barreira**; sem ciclos Lotka-Volterra (energy→alive só na borda de 400
+  ticks, r≤0.09). **`plot.py` ganha guard** por presença de `n_species`
+  (npz antigo → 4 figs, sem crash; novo → `ecology.png`); `plot.py`
+  antigo continua funcionando. `experiments/lineage/run.py` desempacota o
+  log como 4-tuple. `run_variant` aceita dict ou `Config` pronto. **Testes:
+  125 passed** (`pytest -q`, 23 s; +`test_panel_shows_cluster_when_cached`).
+  **Bench** (load <2, duas amostras): **1409–1696 / 766–792 / 459–463** a
+  500/2000/5000 — piso 30 @N=2000 com ~25×, sem regressão vs etapa 11
+  (1397/627/292); o tick não mudou, só bookkeeping fora dele. Próximo
+  passo do usuário: `/cp`.
+- **Etapa 11 ("biologia") concluída (2026-10-09):** plano em
+  `.opencode/plans/etapa-11-biologia.md` (fases A–F);
   decisões do usuário: reprodução **100% sexual** (sem fallback assexuado;
   colapso ⇒ calibrar com o usuário), 4º smell = carniça → layout **30 in /
   443 brain_params / 447 genome**, carne = predação deposita
@@ -552,6 +598,6 @@ antes de dizer que uma mudança de tick não regrediu desempenho.
 
 Roadmap "mundo real" aprovado (`.opencode/plans/roadmap-mundo-real.md`):
 10 ambiente (terreno/estações/luz) ✓ → 11 biologia (sexualidade/senescência/carniça) ✓
-→ 12 ecologia (ciclos tróficos) → 13–16 civilização+ (antiga 10–13).
+→ 12 ecologia (ciclos tróficos) ✓ → 13–16 civilização+ (antiga 10–13).
 
 Trabalhe **apenas na etapa que o usuário indicar**.

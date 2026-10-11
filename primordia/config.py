@@ -150,6 +150,17 @@ class Config:
     carrion_yield: float = 0.3
     meat_decay: float = 0.02
 
+    # --- species clustering (stage 12: metric only, never read by the tick) ---
+    # Normalized genome distance at or below which two living creatures are
+    # counted as the same cluster by ecology.cluster_living. Calibrated at
+    # 3000 ticks (seeds 42/7/123, alive 814-1294): pairwise distances are
+    # bimodal, median ~7.5 with a far tail out to ~370, so K is flat over
+    # [8, 50] and lands 5-15 inside the target band. 1.0 would return K ~= N
+    # (every creature its own cluster). Greedy-leader (not single-linkage):
+    # a big central cluster plus distant outliers each get their own label,
+    # so K tracks the outliers, not a transitive chain.
+    species_threshold: float = 10.0
+
     def __post_init__(self) -> None:
         if self.width <= 0.0 or self.height <= 0.0:
             raise ValueError("world dimensions must be positive")
@@ -221,6 +232,8 @@ class Config:
             raise ValueError("carrion_yield must be in [0, 1]")
         if not 0.0 <= self.meat_decay < 1.0:
             raise ValueError("meat_decay must be in [0, 1)")
+        if self.species_threshold <= 0.0:
+            raise ValueError("species_threshold must be positive")
         if self.genealogy_capacity < 0:
             raise ValueError("genealogy_capacity must be >= 0")
 

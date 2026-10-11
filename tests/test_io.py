@@ -144,6 +144,14 @@ def test_v3_save_is_rejected_clearly(tmp_path: Path) -> None:
         load_world(str(path))
 
 
+def test_v4_save_is_rejected_clearly(tmp_path: Path) -> None:
+    """Pre-stage-12 saves have a 3-column genealogy; the gate must say so."""
+    path = tmp_path / "old.npz"
+    np.savez(path, format_version=np.int32(4))
+    with pytest.raises(ValueError, match="format"):
+        load_world(str(path))
+
+
 def test_numba_rng_state_helpers_roundtrip() -> None:
     """Guard: numba._helperlib must keep exposing the stream (see genome.py)."""
 
@@ -179,10 +187,12 @@ def test_genealogy_ids_and_log() -> None:
 
     assert w.genealogy_used + w.genealogy_overflow == w.births
     log = w.genealogy[: w.genealogy_used]
-    assert log.shape[1] == 3
+    assert log.shape[1] == 4
     assert np.all(np.diff(log[:, 1]) > 0)  # child ids strictly increase
     assert np.all(log[:, 2] >= 0)  # a logged parent is never a founder marker
+    assert np.all(log[:, 3] >= 0)  # neither is the partner (stage 12)
     assert np.all(log[:, 2] < log[:, 1])  # parent born before the child
+    assert np.all(log[:, 3] < log[:, 1])  # partner born before the child
     # every living creature spawned by birth points at an id that existed
     born = w.alive & (w.parent_id >= 0)
     assert np.all(w.parent_id[born] < w.next_id)
