@@ -58,6 +58,10 @@ class Settings:
     # alpha = clip(meat / food_capacity, 0, 1); full cell reads as raw meat
     meat_color: tuple[int, int, int] = (140, 40, 36)
 
+    # signal overlay (stage 13): violet, alpha = clip(signal / signal_capacity,
+    # 0, 1) — drawn last so a call is visible over food, meat and terrain
+    signal_color: tuple[int, int, int] = (150, 90, 220)
+
     # creature scatter: pixel radius = clamp(round(size * zoom * size_scale), 1, max)
     size_scale: float = 3.0
     max_radius_px: int = 8

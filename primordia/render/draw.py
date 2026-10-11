@@ -175,14 +175,18 @@ def draw_world(
     shifts: PixelFormat,
     buffers: FrameBuffers,
     meat_color: tuple[int, int, int] = (140, 40, 36),
+    signal_color: tuple[int, int, int] = (150, 90, 220),
 ) -> None:
-    """Write terrain + food + carrion into ``pixels`` ((w, h) uint32, packed RGB).
+    """Write terrain + food + carrion + signal into ``pixels``.
 
-    Per cell: ``rgb = lerp(lerp(terrain, food, a_f), meat, a_m) * light`` with
-    ``a_f = food / capacity`` and ``a_m = clip(meat / capacity, 0, 1)`` —
-    rich food hides the ground, depletion reveals terrain, carrion paints
-    over both (stage 11). The blend runs on the 200x200 cell grid once per
-    frame; the viewport step is the same single gather as before.
+    Per cell: ``rgb = lerp(lerp(lerp(terrain, food, a_f), meat, a_m),
+    signal, a_s) * light`` with ``a_f = food / capacity``,
+    ``a_m = clip(meat / capacity, 0, 1)`` and ``a_s = clip(signal /
+    signal_capacity, 0, 1)`` — rich food hides the ground, depletion
+    reveals terrain, carrion paints over both (stage 11), and a call is
+    the last thing painted (stage 13). The blend runs on the 200x200
+    cell grid once per frame; the viewport step is the same single
+    gather as before.
     """
     cap = float(world.config.food_capacity)
     f_idx = np.clip(world.food * (255.0 / cap), 0.0, 255.0).astype(np.intp)
@@ -194,6 +198,10 @@ def draw_world(
     meat_a = np.clip(world.meat * np.float32(1.0 / cap), 0.0, 1.0)[..., None]
     meat_rgb = np.asarray(meat_color, dtype=np.float32)[None, None, :]
     rgb = rgb + (meat_rgb - rgb) * meat_a
+    sig_cap = float(world.config.signal_capacity)
+    sig_a = np.clip(world.signal * np.float32(1.0 / sig_cap), 0.0, 1.0)[..., None]
+    sig_rgb = np.asarray(signal_color, dtype=np.float32)[None, None, :]
+    rgb = rgb + (sig_rgb - rgb) * sig_a
     rgb *= float(light)
     np.clip(rgb, 0.0, 255.0, out=rgb)
     cell_pixels = rgb_to_pixel(rgb.astype(np.uint8), shifts)

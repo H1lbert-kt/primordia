@@ -17,13 +17,20 @@ Input vector layout (``Config.sensor_input_dim`` floats, written into
     [3n+6 : 3n+9)            internal: energy / (2 * initial_energy), |vel| /
                              max_speed, and ambient light L(t) (stage 10's
                              circadian cue: what "night" feels like from inside)
+    [3n+9 : 3n+12)           signal (stage 13): smell of the signal field in the
+                             same window / (signal_capacity * cells), plus
+                             left/right antennas over the signal — the same
+                             cross-product split as the food antennas, so a
+                             creature can steer toward or away from a call
 
 Rays march in steps of one cell up to the creature's ``vision_range`` body
 trait times the current light level ``L(t)`` (seeing in the dark is seeing
 less far) divided by the wear factor ``exp(senescence_rate * age)`` (stage
 11: old eyes see less), wrapping toroidally like the rest of the world.
-Creature counts come from ``World.cell_counts`` and the carrion smell from
-``World.meat`` (both current): O(cells + N), never O(N^2).
+Creature counts come from ``World.cell_counts``, carrion smell from
+``World.meat`` and signal smell from ``World.signal`` (all current):
+O(cells + N), never O(N^2). A creature smells its own emission (no
+self-exclusion on the signal field): self-monitoring is allowed to evolve.
 No random numbers are drawn in this module.
 """
 
@@ -59,6 +66,7 @@ def input_groups(config: Config) -> tuple[tuple[str, slice | np.ndarray], ...]:
         ("energy", slice(smell + 6, smell + 7)),
         ("speed", slice(smell + 7, smell + 8)),
         ("light", slice(smell + 8, smell + 9)),
+        ("signal", slice(smell + 9, smell + 12)),
     )
 
 
@@ -73,6 +81,7 @@ def perceive(
     genome: np.ndarray,
     food: np.ndarray,
     meat: np.ndarray,
+    signal: np.ndarray,
     cell_counts: np.ndarray,
     cell_diet: np.ndarray,
     ray_unit: np.ndarray,
@@ -90,6 +99,7 @@ def perceive(
     food_capacity: np.float32,
     energy_scale: np.float32,
     light: np.float32,
+    signal_capacity: np.float32,
     senescence_rate: np.float32,
 ) -> None:
     """Fill ``sensor_buf[i]`` for every living creature (parallel over slots)."""
@@ -182,6 +192,11 @@ def perceive(
         scarrion = np.float32(0.0)  # carrion: the meat grid itself (stage 11)
         sf_left = np.float32(0.0)
         sf_right = np.float32(0.0)
+        # signal (stage 13): the same window, self included — a creature
+        # smells its own marker too (the field has no self-exclusion)
+        ssig = np.float32(0.0)
+        ssig_left = np.float32(0.0)
+        ssig_right = np.float32(0.0)
         for dy in range(-smell_r, smell_r + 1):
             for dx in range(-smell_r, smell_r + 1):
                 iy = iy0 + dy
@@ -199,11 +214,15 @@ def perceive(
                 sc = sc + np.float32(cell_counts[iy, ix])
                 sp = sp + cell_diet[iy, ix]
                 scarrion = scarrion + meat[iy, ix]
+                sig = signal[iy, ix]
+                ssig = ssig + sig
                 cross = c * np.float32(dy) - s * np.float32(dx)
                 if cross < 0.0:
                     sf_left = sf_left + fv
+                    ssig_left = ssig_left + sig
                 elif cross > 0.0:
                     sf_right = sf_right + fv
+                    ssig_right = ssig_right + sig
         sensor_buf[i, base] = sf * inv_cap * inv_smell
         sensor_buf[i, base + 1] = (sc - np.float32(1.0)) * inv_smell
         # prey smell excludes my own diet contribution (like the creature count)
@@ -222,3 +241,10 @@ def perceive(
         else:
             sensor_buf[i, base + 7] = 0.0
         sensor_buf[i, base + 8] = light  # ambient light: identical for all
+
+        # signal smell (stage 13): window sum normalized by capacity * cells,
+        # plus left/right antennas so the panel and the brain see the gradient
+        inv_sig = np.float32(1.0) / (signal_capacity * smell_side * smell_side)
+        sensor_buf[i, base + 9] = ssig * inv_sig
+        sensor_buf[i, base + 10] = ssig_left * inv_sig * np.float32(2.0)
+        sensor_buf[i, base + 11] = ssig_right * inv_sig * np.float32(2.0)

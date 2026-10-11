@@ -147,6 +147,10 @@ class World:
         self.cell_h = np.float32(config.height / gh)
         self.food = np.full((gh, gw), config.initial_food, dtype=np.float32)
         self.meat = np.zeros((gh, gw), dtype=np.float32)
+        # Signal field (stage 13): scalar broadcast channel, zero at spawn.
+        # Emission deposits here; decay_signal bleeds it; the tick never
+        # reads it back into energy (it is information, not food).
+        self.signal = np.zeros((gh, gw), dtype=np.float32)
         self.cell_counts = np.zeros((gh, gw), dtype=np.int32)
         self.cell_diet = np.zeros((gh, gw), dtype=np.float32)
         n_cells = gh * gw
@@ -175,6 +179,10 @@ class World:
         self.deaths_predation = 0
         # Total energy ever extracted from carrion (stage 11 gate metric).
         self.meat_eaten = 0.0
+        # Total signal ever deposited (stage 13 gate metric); float64 so
+        # long runs do not lose counts, same pattern as meat_eaten. Saved
+        # as a scalar in io.py.
+        self.signal_emitted = 0.0
         # Cumulative bites by the *attacker's* diet class (stage 12.5):
         # [herbivore (< HERB_MAX), omnivore, predator (> PRED_MIN)] — the
         # measurement buckets of ecology.py, int64 counts of successful

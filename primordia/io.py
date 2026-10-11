@@ -1,10 +1,11 @@
 """Save and load the entire world as a versioned ``.npz`` (stage 7).
 
-Format v5 stores exactly what is needed to continue a run bit-for bit
+Format v6 stores exactly what is needed to continue a run bit-for bit
 (v2 added ``food_field`` and ``hidden_prev``; v3 adds ``terrain``, the
 stage-10 geography; v4 adds ``meat`` and ``meat_eaten``, the stage-11
 carrion cycle; v5 widens the genealogy log to 4 columns so both parents
-are recorded, the stage-12 reproductive-barrier metric; readers reject
+are recorded, the stage-12 reproductive-barrier metric; v6 adds ``signal``
+and ``signal_emitted``, the stage-13 communication field; readers reject
 older versions with a clear message):
 
     format_version  int32 scalar; readers reject other versions
@@ -16,8 +17,9 @@ older versions with a clear message):
     free_count, next_id, genealogy_used, genealogy_overflow
                     int64 scalars
     meat_eaten      float64 scalar (cumulative carrion energy extracted)
+    signal_emitted  float64 scalar (cumulative signal deposited)
     pos vel angle energy age genome species_id parent_id creature_id
-    alive free_list food food_field terrain meat hidden_prev
+    alive free_list food food_field terrain meat signal hidden_prev
                     the SoA state arrays
     genealogy       (used, 4) int32 birth log, trimmed to genealogy_used
 
@@ -50,7 +52,7 @@ from .config import Config
 from .genome import get_numba_rng_state, set_numba_rng_state
 from .world import World
 
-FORMAT_VERSION = 5
+FORMAT_VERSION = 6
 
 _INT_SCALARS = (
     "seed",
@@ -64,7 +66,7 @@ _INT_SCALARS = (
     "genealogy_used",
     "genealogy_overflow",
 )
-_FLOAT_SCALARS = ("meat_eaten",)
+_FLOAT_SCALARS = ("meat_eaten", "signal_emitted")
 _ARRAYS = (
     "pos",
     "vel",
@@ -81,12 +83,13 @@ _ARRAYS = (
     "food_field",
     "terrain",
     "meat",
+    "signal",
     "hidden_prev",
 )
 
 
 def save_world(world: World, path: str) -> None:
-    """Write the full simulation state to ``path`` (npz, format v5)."""
+    """Write the full simulation state to ``path`` (npz, format v6)."""
     payload: dict[str, np.ndarray] = {
         "format_version": np.int32(FORMAT_VERSION),
         "config_json": np.array(json.dumps(asdict(world.config), sort_keys=True)),

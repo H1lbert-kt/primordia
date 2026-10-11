@@ -206,7 +206,7 @@ def render_panel(
         )
         frac = float(world.energy[slot]) / (cfg.reproduce_threshold * 2.0)
         _hbar(dst, x, y, width, 10, frac, settings, signed=False)
-        y += 14
+        y += 12
         y = _text(
             dst,
             18,
@@ -216,7 +216,7 @@ def render_panel(
             y,
             settings.text_dim,
         )
-        y += 6
+        y += 4
 
         # sensors: groups from the single layout in sensors.input_groups
         y = _text(dst, 20, "SENSORS", x, y, settings.text)
@@ -226,7 +226,7 @@ def render_panel(
             if vals.size > 1:
                 y = _text(dst, 16, label, x, y, settings.text_dim)
                 _vbar_row(dst, x, y, width, 22, vals, settings, signed=False)
-                y += 26
+                y += 24
             else:
                 val = float(vals[0])
                 _text(dst, 16, label, x, y - 1, settings.text_dim)
@@ -239,8 +239,8 @@ def render_panel(
                     y - 1,
                     settings.text_dim,
                 )
-                y += 10  # stage 11: 8 single-sensor rows must fit the 720px panel
-        y += 4
+                y += 8  # stage 13: 9 single-sensor rows + signal group must fit 720px
+        y += 2
 
         # brain: hidden activations and raw outputs
         y = _text(dst, 20, "BRAIN", x, y, settings.text)
@@ -249,19 +249,20 @@ def render_panel(
         _vbar_row(
             dst, x, y, width, 22, world.hidden_buf[slot], settings, signed=True
         )
-        y += 26
+        y += 24
         logits = world.actions[slot]
         outs = (
             ("accel", float(np.tanh(logits[0])), True),
             ("turn", float(np.tanh(logits[1])), True),
             ("gate", float(0.5 * (1.0 + np.tanh(logits[2]))), False),
+            ("emit", float(0.5 * (1.0 + np.tanh(logits[3]))), False),
         )
         for label, val, signed in outs:
             _text(dst, 16, label, x, y - 1, settings.text_dim)
             _hbar(dst, x + 110, y, width - 160, 9, val, settings, signed)
             _text(dst, 16, f"{val:+.2f}", x + width - 46, y - 1, settings.text_dim)
-            y += 12
-        y += 4
+            y += 10
+        y += 2
 
         # weights: W1|b1, W2|b2 and the recurrent W_rec (layout in brain.py)
         traits = cfg.brain_params
@@ -336,10 +337,11 @@ def render_panel(
     alive = world.alive_count
     mean_e = float(world.energy[world.alive].mean()) if alive else 0.0
     meat_total = float(world.meat.sum(dtype=np.float64))
+    sig_total = float(world.signal.sum(dtype=np.float64))
     stats = (
         f"tick {world.tick}   alive {alive}/{world.config.max_creatures}"
         f"   species {hud.species_k if hud.species_k is not None else '-'}",
-        f"mean energy {mean_e:.1f}   meat {meat_total:.0f}",
+        f"mean energy {mean_e:.1f}   meat {meat_total:.0f}   sig {sig_total:.0f}",
         f"births {world.births}   famine {world.deaths_famine}",
         f"age deaths {world.deaths_age}   predation {world.deaths_predation}",
         f"fps {hud.fps:.0f}   sim x{hud.speed}{'  [PAUSED]' if hud.paused else ''}"

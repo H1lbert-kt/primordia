@@ -142,6 +142,32 @@ def plot_history(history: StatsHistory, out_dir: Path) -> list[Path]:
         axes[1].set_title("species clusters and reproductive barrier")
         paths.append(_save(fig, out_dir, "ecology.png"))
 
+    # Stage-13 columns (signal channel) are only present in histories
+    # recorded on a stage-13+ tree; guard instead of crashing.
+    if "signal_emitted" in history.data:
+        fig, axes = plt.subplots(1, 2, figsize=(11, 4), sharex=True)
+        axes[0].plot(tick, history["signal_emitted"], color="tab:purple",
+                     label="signal_emitted/tick")
+        axes[0].set_ylabel("deposit per tick", color="tab:purple")
+        axes[0].set_xlabel("tick")
+        axes[0].grid(alpha=0.3)
+        axes[0].legend(loc="upper left", fontsize=8)
+        axes[0].set_title("signal deposited per tick")
+        axes[1].plot(tick, history["signal_mass"], color="tab:purple",
+                     label="signal_mass")
+        axes[1].set_ylabel("field mass", color="tab:purple")
+        ax2 = axes[1].twinx()
+        ax2.plot(tick, history["emit_mean"], color="tab:orange", alpha=0.7,
+                 label="emit_mean")
+        ax2.set_ylabel("mean gate fraction", color="tab:orange")
+        axes[1].set_xlabel("tick")
+        axes[1].grid(alpha=0.3)
+        lines = axes[1].get_lines() + ax2.get_lines()
+        axes[1].legend(lines, [ln.get_label() for ln in lines],
+                       loc="upper left", fontsize=8)
+        axes[1].set_title("signal field mass and emit gate")
+        paths.append(_save(fig, out_dir, "signal.png"))
+
     return paths
 
 

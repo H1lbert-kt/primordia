@@ -14,9 +14,53 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   README principal em **inglês**.
 
 ## Estado atual do repositório (verificado em 2026-10-11)
-- **Etapa 12.5 ("ratchet de predação") implementada, commit pendente
-  de `/cp`:** ratchet **quebra com Config só** (nada de tick novo além de
-  contadores de diagnóstico). `Config.bite_rate`/`contact_range`/`bite_efficiency`
+- **Etapa 13 ("canal de sinais") implementada, commit pendente de `/cp`:**
+  canal comum escalar **sem recompensa** (princípio 1 intocado): campo
+  `signal (H,W) float32` com decaimento geométrico **local** (sem difusão —
+  essa é a etapa 14), gate de emissão = 4ª saída do cérebro (`N_OUTPUTS`
+  3→4, mesmo scaled-sigmoid do eat gate), depósito `emit_rate·gate` na
+  própria célula e custo `signal_emit_cost·gate` drenado da energia;
+  sinal emitido só visível no tick seguinte (perceive roda antes de
+  emit_signal — contrato documentado em `step.py`). **3 sensores novos**
+  (`n_rays*3+9…+11`): cheiro do campo na janela de cheiro + antenas
+  esq/dir por produto cruzado (sem self-exclusion — auto-monitoramento
+  permitido). Layout: **33 in / 4 out / 484 brain_params / 488 genoma**;
+  fases 12→14 (`decay_signal` após `decay_meat`, `emit_signal` após
+  `apply_actions`). **`FORMAT_VERSION` 5→6** (`signal` + `signal_emitted`;
+  v1–v5 → ValueError). Novos `Config`: `signal_decay=0.05`,
+  `emit_rate=1.0`, `signal_emit_cost=0.0`, `signal_capacity=1.0`.
+  **`signal_emit_cost` default = 0 é desvio deliberado do plano (0.5):**
+  o gate sigmoid nunca fecha, então um custo default >0 taxaria toda
+  criatura ~cost/2 por tick desde o nascimento e quebraria conservação e
+  balanço; o preço é tratamento de experimento (em `proto_culture.toml`
+  = 0.5). **Stats novos:** `signal_emitted` (delta), `signal_mass`
+  (soma do campo), `emit_mean` (gate médio sobre vivos). **Render:**
+  overlay violeta `signal_color` por último no blend, HUD `sig N`,
+  painel com linha `emit` (pitch ajustado p/ caber em 720 px). **Experimento
+  `experiments/signals/`** (proto 0.5 / cheap 0.001 / pricey 2.0 sobre
+  `proto_culture.toml`, 3 seeds, screening 6k + gate 10k): hipótese
+  a priori = preço é contornado pelo fechamento do gate sem mudar pop
+  — **metade refutada**. `emit_mean` cai monótono com o preço (0.70 →
+  0.33 → 0.00), seleção age no gate em poucos k ticks, **mas** o imposto
+  bate desde o nascimento (gate ~0.7 × 0.5 = 0.35 e/tick ≈ 4× metabolismo)
+  e a pop morre antes: gate 10k = proto 33 vivos (seed 13 extinta),
+  cheap 728 (spam 2M unidades, predação 788, diet_max 0.52 — só a
+  variante barata tem predação viva), **pricey extinta 3/3**. Gate duro
+  ✗ p/ proto e pricey, ✓ p/ cheap; medido (emitted>0 em ≥1/3) ✓ mas
+  irrelevante (mundo pagando estava morrendo). Janela de preço viável
+  não caçada (só bracket). `proto_culture.toml` ganhou
+  `signal_emit_cost=0.5`; **defaults de `Config` não mudaram**.
+  **Suíte: 143 passed** (`pytest -q`, 151 s). Bench (load 0.8–3.8, duas
+  amostras): **1346/861/516** e **683/516/162** a 500/2000/5000 — piso 30
+  @N=2000 com 17–29×, sem regressão vs 12.5 (1133/788/310; a diferença é
+  ruído de carga, o tick novo custa ~2 leituras por célula no smell). `plot.py` ganha
+  fig `signal.png` com guard por presença de `signal_emitted`.
+  Próximo passo do usuário: `/cp`, depois etapa 14 (feromônio/difusão)
+  em `.opencode/plans/etapa-13-sinais.md` (Jacobi/difusão) — mas antes,
+  calibrar o preço do sinal se 14+ for usar o canal.
+- **Etapa 12.5 ("ratchet de predação") concluída, commitada em
+  `origin/master` (`9646ab5`):** ratchet **quebra com Config só** (nada de
+  tick novo além de contadores de diagnóstico). `Config.bite_rate`/`contact_range`/`bite_efficiency`
   são as alavancas; experimento em `experiments/predator_survival/`:
   screening 8 variantes × 3 seeds (42/7/13) × 6k + gate `--phase gate`
   (base/reach/bigbite+ × 10k). Resultado: `reach` (bite_rate=12,

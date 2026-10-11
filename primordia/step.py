@@ -10,25 +10,31 @@ profiler in ``bench``):
     1. grow food        (parallel over cells; models photosynthesis)
     2. decay meat       (parallel over cells; carrion loses meat_decay per
        tick, stage 11 — nutrients are borrowed, not stored)
-    3. age + metabolize (parallel over slots, alive only; energy drains by
+    3. decay signal     (parallel over cells; signal loses signal_decay per
+       tick, stage 13 — a broadcast is information, it fades)
+    4. age + metabolize (parallel over slots, alive only; energy drains by
        metabolic_cost * wear plus move_cost * |vel|^2, wear =
        exp(senescence_rate * age), stage 11)
-    4. perceive         (parallel: rays + smells + internal -> sensor_buf;
+    5. perceive         (parallel: rays + smells + internal -> sensor_buf;
        ray reach also divided by wear)
-    5. think            (parallel: MLP forward -> hidden_buf, raw actions)
-    6. apply actions    (parallel: accel/turn -> vel/angle, eat gate; turning
-        drains turn_cost * |radians| — steering is never free; top speed
-        divided by wear)
-    7. eat              (serial: shared cells; food first, then carrion;
+    6. think            (parallel: MLP forward -> hidden_buf, raw actions)
+    7. apply actions    (parallel: accel/turn -> vel/angle, eat gate, emit
+        gate; turning drains turn_cost * |radians| — steering is never
+        free; top speed divided by wear)
+    8. emit signal      (serial: own-cell deposit of emit_rate * gate,
+        drained from energy at signal_emit_cost * gate, stage 13 — the
+        deposit is only visible to perceive from the *next* tick, since
+        perceive already ran; the contract is deliberate, never reordered)
+    9. eat              (serial: shared cells; food first, then carrion;
         extraction * gate)
-    8. bite             (serial: contact predation; gate * diet budget, energy
+    10. bite             (serial: contact predation; gate * diet budget, energy
        transfer at bite_efficiency, the dissipating share lands as carrion,
        prey at 0 energy is killed here and counted as predation)
-    9. integrate motion + wrap borders (parallel, alive only)
-    10. deaths          (serial: kill, deposit leftover body energy as carrion,
+    11. integrate motion + wrap borders (parallel, alive only)
+    12. deaths          (serial: kill, deposit leftover body energy as carrion,
        zero energy, push slot to free-list)
-    11. reproduce       (serial: energy >= threshold -> nearest partner within
-       mate_range -> child; uses the slots freed in phases 8 and 10;
+    13. reproduce       (serial: energy >= threshold -> nearest partner within
+       mate_range -> child; uses the slots freed in phases 9 and 12;
        newborns skip perceive/think until the next tick)
 
 Perception uses positions from the start of the tick, movement is applied
@@ -124,6 +130,15 @@ def _decay_meat(meat: np.ndarray, rate: np.float32) -> None:
             meat[i, j] = meat[i, j] * (np.float32(1.0) - rate)
 
 
+@njit(cache=True, parallel=True)
+def _decay_signal(signal: np.ndarray, rate: np.float32) -> None:
+    """Signal fades by ``signal_decay`` per tick (stage 13 — no diffusion
+    yet; stage 14's pheromone will add the Jacobi pass)."""
+    for i in prange(signal.shape[0]):
+        for j in range(signal.shape[1]):
+            signal[i, j] = signal[i, j] * (np.float32(1.0) - rate)
+
+
 @njit(cache=True)
 def _eat(
     pos: np.ndarray,
@@ -177,6 +192,52 @@ def _eat(
             energy[i] = energy[i] + take_m
             meat_eaten = meat_eaten + take_m
     return meat_eaten
+
+
+@njit(cache=True)
+def _emit_signal(
+    pos: np.ndarray,
+    energy: np.ndarray,
+    alive: np.ndarray,
+    signal: np.ndarray,
+    actions: np.ndarray,
+    cell_w: np.float32,
+    cell_h: np.float32,
+    gw: np.int32,
+    gh: np.int32,
+    emit_rate: np.float32,
+    emit_cost: np.float32,
+) -> float:
+    """Serial: own-cell deposits only, but keep the ordering deterministic.
+
+    The brain's emit gate (output 3, decoded in apply_actions) deposits
+    ``emit_rate * gate`` signal on the creature's own cell and drains
+    ``signal_emit_cost * gate`` energy (stage 13 — communicating is a
+    physical cost, never a rewarded behavior). Returns the total deposited
+    (the caller adds it to ``World.signal_emitted``).
+    """
+    emitted = np.float32(0.0)
+    for i in range(alive.size):
+        if not alive[i]:
+            continue
+        gate = actions[i, 3]
+        if gate <= 0.0:
+            continue
+        cx = int(pos[i, 0] / cell_w)
+        cy = int(pos[i, 1] / cell_h)
+        if cx < 0:
+            cx = 0
+        elif cx >= gw:
+            cx = gw - 1
+        if cy < 0:
+            cy = 0
+        elif cy >= gh:
+            cy = gh - 1
+        deposit = emit_rate * gate
+        signal[cy, cx] = signal[cy, cx] + deposit
+        energy[i] = energy[i] - emit_cost * gate
+        emitted = emitted + deposit
+    return emitted
 
 
 @njit(cache=True, parallel=True)
@@ -276,6 +337,12 @@ def phase_decay_meat(world: World) -> None:
         _decay_meat(world.meat, np.float32(cfg.meat_decay))
 
 
+def phase_decay_signal(world: World) -> None:
+    cfg = world.config
+    if cfg.signal_decay > 0.0:
+        _decay_signal(world.signal, np.float32(cfg.signal_decay))
+
+
 def phase_age_and_metabolize(world: World) -> None:
     cfg = world.config
     _age_and_metabolize(
@@ -316,6 +383,7 @@ def phase_perceive(world: World) -> None:
         world.genome,
         world.food,
         world.meat,
+        world.signal,
         world.cell_counts,
         world.cell_diet,
         world.ray_unit,
@@ -333,6 +401,7 @@ def phase_perceive(world: World) -> None:
         np.float32(cfg.food_capacity),
         np.float32(energy_scale),
         light,
+        np.float32(cfg.signal_capacity),
         np.float32(cfg.senescence_rate),
     )
 
@@ -367,6 +436,25 @@ def phase_apply_actions(world: World) -> None:
         np.int32(cfg.brain_params),
         np.float32(cfg.senescence_rate),
     )
+
+
+def phase_emit_signal(world: World) -> None:
+    cfg = world.config
+    gh, gw = world.signal.shape
+    emitted = _emit_signal(
+        world.pos,
+        world.energy,
+        world.alive,
+        world.signal,
+        world.actions,
+        world.cell_w,
+        world.cell_h,
+        np.int32(gw),
+        np.int32(gh),
+        np.float32(cfg.emit_rate),
+        np.float32(cfg.signal_emit_cost),
+    )
+    world.signal_emitted += float(emitted)
 
 
 def phase_eat(world: World) -> None:
@@ -649,10 +737,12 @@ PHASES = (
     ("rebuild_counts", phase_rebuild_counts),
     ("grow_food", phase_grow_food),
     ("decay_meat", phase_decay_meat),
+    ("decay_signal", phase_decay_signal),
     ("age_metabolize", phase_age_and_metabolize),
     ("perceive", phase_perceive),
     ("think", phase_think),
     ("apply_actions", phase_apply_actions),
+    ("emit_signal", phase_emit_signal),
     ("eat", phase_eat),
     ("bite", phase_bite),
     ("integrate", phase_integrate),

@@ -18,7 +18,7 @@ class Config:
     a single source of truth.
     """
 
-    N_OUTPUTS: ClassVar[int] = 3  # accel, turn, eat-gate
+    N_OUTPUTS: ClassVar[int] = 4  # accel, turn, eat-gate, emit-gate (stage 13)
     N_BODY_TRAITS: ClassVar[int] = 4  # max_speed, size, vision_range, diet
 
     # --- world geometry ---
@@ -95,8 +95,8 @@ class Config:
     smell_radius_cells: int = 1  # (2r+1)^2 cells sensed around the creature
 
     # --- brain ---
-    # 10 keeps brain_params at 443 (with the 30 inputs + W_rec), inside the
-    # 100-500 parameter budget; 12 would push it well beyond.
+    # 10 keeps brain_params at 484 (with the 33 inputs + 4 outputs + W_rec),
+    # inside the 100-500 parameter budget; 12 would push it well beyond.
     hidden_size: int = 10
     weight_init_std: float = 0.5  # std of N(0, std) weights drawn at spawn
 
@@ -149,6 +149,21 @@ class Config:
     # drain food first, then meat; meat decays by meat_decay per tick.
     carrion_yield: float = 0.3
     meat_decay: float = 0.02
+
+    # --- signal channel (stage 13: one common scalar channel, no reward) ---
+    # A creature may deposit signal on its own cell (emit gate, output 3)
+    # and smell the sum over the cheiro window. The tick never rewards
+    # communicating — whether anyone uses the channel is an experiment
+    # question, not a rule. No diffusion yet: the field only decays
+    # geometrically (diffusion is stage 14's pheromone).
+    # Default signal_emit_cost is 0: the emit gate is a sigmoid that never
+    # reaches exactly 0, so a nonzero default would tax every creature
+    # ~cost/2 per tick and silently change the whole economy. The cost is
+    # a treatment applied by experiments (configs/proto_culture.toml).
+    signal_decay: float = 0.05  # per-tick multiplicative decay in [0, 1)
+    emit_rate: float = 1.0  # signal units deposited per tick at gate=1
+    signal_emit_cost: float = 0.0  # energy drained per tick at gate=1
+    signal_capacity: float = 1.0  # perception normalizer (like food_capacity)
 
     # --- species clustering (stage 12: metric only, never read by the tick) ---
     # Normalized genome distance at or below which two living creatures are
@@ -232,6 +247,14 @@ class Config:
             raise ValueError("carrion_yield must be in [0, 1]")
         if not 0.0 <= self.meat_decay < 1.0:
             raise ValueError("meat_decay must be in [0, 1)")
+        if not 0.0 <= self.signal_decay < 1.0:
+            raise ValueError("signal_decay must be in [0, 1)")
+        if self.emit_rate < 0.0:
+            raise ValueError("emit_rate must be >= 0")
+        if self.signal_emit_cost < 0.0:
+            raise ValueError("signal_emit_cost must be >= 0")
+        if self.signal_capacity <= 0.0:
+            raise ValueError("signal_capacity must be positive")
         if self.species_threshold <= 0.0:
             raise ValueError("species_threshold must be positive")
         if self.genealogy_capacity < 0:
@@ -249,9 +272,10 @@ class Config:
     def sensor_input_dim(self) -> int:
         """Inputs: 3 ray channels (food sum, creatures, food peak), 4 smells
         (food, creatures, prey-diet, carrion — stage 11), 2 food antennas
-        (left/right of heading) and 3 internal sensors (energy, speed,
-        ambient light — stage 10's circadian cue)."""
-        return self.n_rays * 3 + 9
+        (left/right of heading), 3 internal sensors (energy, speed,
+        ambient light — stage 10's circadian cue) and, since stage 13, 3
+        signal slots (smell + left/right antennas over the signal field)."""
+        return self.n_rays * 3 + 12
 
     @property
     def brain_params(self) -> int:

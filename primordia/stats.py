@@ -8,6 +8,13 @@ one row per recorded tick in pre-allocated int32/float32 columns:
     births, deaths_famine, deaths_age, deaths_predation      (per-tick deltas
         of the World's cumulative counters)
     meat_eaten       (per-tick delta of World.meat_eaten, stage 11 carrion)
+    signal_emitted   (per-tick delta of World.signal_emitted, stage 13:
+                      how much signal was deposited this tick — 0 means
+                      no living creature opened the emit gate)
+    signal_mass      (current sum of the signal field, gauge every tick:
+                      mass at equilibrium is deposit_rate / signal_decay)
+    emit_mean        (mean emit-gate fraction over living creatures, from
+                      the last think's logits — reads 0 when nothing lives)
     bite_herb, bite_omni, bite_pred
                      (per-tick deltas of World.bite_by_diet, stage 12.5:
                      successful takes grouped by the *attacker's* diet class)
@@ -88,6 +95,9 @@ FLOAT_COLUMNS = (
     "diet_p90",
     "diet_p99",
     "meat_eaten",
+    "signal_emitted",
+    "signal_mass",
+    "emit_mean",
     "genome_dist",
     "n_species",
     "barrier",
@@ -143,6 +153,7 @@ class StatsRecorder:
         self._prev_cum = np.zeros(4, dtype=np.int64)  # famine/age/predation/births
         self._prev_meat = np.float64(0.0)  # cumulative meat_eaten delta baseline
         self._prev_bite = np.zeros(3, dtype=np.int64)  # bite_by_diet baseline
+        self._prev_signal = np.float64(0.0)  # signal_emitted delta baseline
         self._last_dist = np.float32(0.0)
         self._last_diet_p = (np.float32(0.0), np.float32(0.0), np.float32(0.0))
         self._last_n_species = np.float32(0.0)
@@ -233,6 +244,9 @@ class StatsRecorder:
             cols["n_omnivore"][i] = np.int32(np.count_nonzero(diet_labels == 1))
             cols["n_predator"][i] = np.int32(np.count_nonzero(diet_labels == 2))
             cols["diet_max"][i] = np.float32(traits[:, 3].max())
+            cols["emit_mean"][i] = np.float32(
+                0.5 * (1.0 + np.tanh(world.actions[alive, 3])).mean()
+            )
         else:
             cols["mean_energy"][i] = 0.0
             cols["mean_age"][i] = 0.0
@@ -240,6 +254,7 @@ class StatsRecorder:
             cols["n_omnivore"][i] = 0
             cols["n_predator"][i] = 0
             cols["diet_max"][i] = 0.0
+            cols["emit_mean"][i] = 0.0
             means = stds = np.zeros(4, dtype=np.float32)
         for k, trait in enumerate(("speed", "size", "vision", "diet")):
             cols[f"{trait}_mean"][i] = np.float32(means[k])
@@ -253,6 +268,13 @@ class StatsRecorder:
             self._prev_cum[k] = cum[k]
         cols["meat_eaten"][i] = np.float32(world.meat_eaten - self._prev_meat)
         self._prev_meat = np.float64(world.meat_eaten)
+        cols["signal_emitted"][i] = np.float32(
+            world.signal_emitted - self._prev_signal
+        )
+        self._prev_signal = np.float64(world.signal_emitted)
+        # full-field sum: 40k float32 adds (~40 µs), cheap next to record's
+        # existing trait means; the mass shows whether the field is alive
+        cols["signal_mass"][i] = np.float32(world.signal.sum(dtype=np.float64))
         for k, name in enumerate(("bite_herb", "bite_omni", "bite_pred")):
             cols[name][i] = np.int32(world.bite_by_diet[k] - self._prev_bite[k])
             self._prev_bite[k] = world.bite_by_diet[k]

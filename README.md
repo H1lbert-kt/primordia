@@ -22,10 +22,11 @@ pytest -q
 - **No fitness, no objectives.** Energy is the only currency: eat food (or
   meat), pay metabolic and movement costs, and split when you cross
   `reproduce_threshold`. Death = energy ≤ 0, `max_age`, or a predator's bite.
-- **Evolvable body and brain.** Each creature is a genome of 447 values: a
-  30-input network (7-ray food sum, creatures, prey and carrion peak
-  channels, left/right food antennas, internal state, ambient light) → 10
-  hidden units with Elman recurrence → turn, accelerate, eat/attack — plus
+- **Evolvable body and brain.** Each creature is a genome of 488 values: a
+  33-input network (7-ray food sum, creatures, prey and carrion peak
+  channels, left/right food antennas, internal state, ambient light, and
+  three signal-field sensors) → 10 hidden units with Elman recurrence →
+  turn, accelerate, eat/attack, emit signal — plus
   body traits: max speed, size, vision range, and *diet* (0 = herbivore;
   predation capability is itself a trait that has to evolve).
 - **Sex and aging, not just cloning.** Reproduction is sexual: an initiator
@@ -59,9 +60,11 @@ limitations in each experiment's README.
 > 10 hidden units, Elman recurrence), stage 9.5 recalibrated the economy,
 > stage 10 added a 29th input (ambient light) plus terrain/day-night/seasons,
 > stage 11 switched to sexual reproduction, added senescence and carrion
-> (30 inputs, `FORMAT_VERSION 4`), and stage 12 widened the genealogy log
+> (30 inputs, `FORMAT_VERSION 4`), stage 12 widened the genealogy log
 > with the mating partner and added the species/barrier stats columns
-> (`FORMAT_VERSION 5`). The experiment scripts pin the old regime
+> (`FORMAT_VERSION 5`), and stage 13 wired the common signal channel
+> (33 inputs, a 4th brain output, `FORMAT_VERSION 6`). The experiment
+> scripts pin the old regime
 > off via `STAGE8_BASE` so the *regime* is preserved — but reruns on current
 > HEAD use the sexual dynamics; the original asexual runs stay in each
 > experiment's gitignored `data/` cache (bit-exact reproduction needs the
@@ -169,11 +172,11 @@ the whole scene dims with the day/night cycle shown as `light` in the HUD.
 
 Target: ≥ 30 ticks/s at 2000 creatures headless (i5-8265U, no GPU).
 
-| creatures | ticks/s (load 2.6, stage 10 environment) |
+| creatures | ticks/s (load 0.8–3.8, stage-13 signal channel active) |
 |---|---|
-| 500 | 1533 |
-| 2000 | 700 |
-| 5000 | 430 |
+| 500 | 683–1346 |
+| 2000 | 516–861 |
+| 5000 | 162–516 |
 
 Numbers vary 2–4× between processes depending on machine load (this box runs
 a desktop session); compare A/B in the same session. The stage-10 economy
@@ -214,7 +217,7 @@ primordia/
   config.py   world.py   genome.py   brain.py   sensors.py
   step.py     stats.py   io.py       bench.py   ecology.py
   render/     # pygame viewer + headless GIF recorder (never imported by core)
-tests/        # 125 tests: determinism, invariants, save/load, guards
+tests/        # 143 tests: determinism, invariants, save/load, guards
 experiments/  # one script + README per experiment
 run.py        # CLI: --seed --headless --ticks --load --save --stats
               #      --config --record --screenshot --select

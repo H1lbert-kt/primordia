@@ -303,7 +303,8 @@ def test_load_npz_without_ecology_columns() -> None:
                              "n_herbivore", "n_omnivore", "n_predator",
                              "diet_max", "meat_eaten",
                              "diet_p50", "diet_p90", "diet_p99",
-                             "bite_herb", "bite_omni", "bite_pred")]
+                             "bite_herb", "bite_omni", "bite_pred",
+                             "signal_emitted", "signal_mass", "emit_mean")]
     payload = {name: rec.to_dict()[name] for name in old_cols}
     payload["columns"] = np.array(old_cols)
     payload["seed"] = np.int64(1)
@@ -321,6 +322,8 @@ def test_load_npz_without_ecology_columns() -> None:
     assert "meat_eaten" not in loaded.data
     assert "diet_p50" not in loaded.data
     assert "bite_herb" not in loaded.data
+    assert "signal_emitted" not in loaded.data
+    assert "signal_mass" not in loaded.data
 
 
 def test_diet_max_tracks_living_diet() -> None:
@@ -433,3 +436,29 @@ def test_bite_buckets_are_per_tick_deltas() -> None:
         assert int(data[name].sum()) == int(
             w.bite_by_diet[("bite_herb", "bite_omni", "bite_pred").index(name)]
         ), name
+
+
+def test_signal_columns_match_world() -> None:
+    """signal_emitted deltas sum to the counter; mass/emit_mean are gauges."""
+    cfg = Config(
+        max_creatures=16,
+        initial_creatures=8,
+        signal_emit_cost=0.2,
+        signal_decay=0.1,
+    )
+    w = World(cfg, seed=1)
+    rec = StatsRecorder(capacity=8, sample_every=2, sample_size=8,
+                        cluster_every=1)
+    for _ in range(5):
+        step.advance(w)
+        rec.record(w)
+    data = rec.to_dict()
+    assert np.all(data["signal_emitted"] >= 0.0)
+    assert float(data["signal_emitted"].sum()) == pytest.approx(
+        w.signal_emitted, rel=1e-5
+    )
+    # signal_mass is the live field sum; emit_mean in [0, 1] over living
+    assert float(data["signal_mass"][-1]) == pytest.approx(
+        float(w.signal.sum(dtype=np.float64)), rel=1e-5
+    )
+    assert np.all((data["emit_mean"] >= 0.0) & (data["emit_mean"] <= 1.0))

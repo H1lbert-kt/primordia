@@ -170,7 +170,7 @@ def test_light_sensor_tracks_cycle() -> None:
     cfg = make_config(day_amp=0.5)
     w = World(cfg, seed=2)
     slots = np.flatnonzero(w.alive)
-    light_idx = cfg.sensor_input_dim - 1  # light is the last input
+    light_idx = cfg.n_rays * 3 + 8  # light sits before the signal slots (stage 13)
 
     w.tick = 200
     step.phase_rebuild_counts(w)

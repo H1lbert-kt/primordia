@@ -147,7 +147,7 @@ class WorldRecorder:
         draw_world(
             pixels, world, self._camera,
             self._food_lut, self._terrain_lut, light, self._shifts, self._buffers,
-            s.meat_color,
+            s.meat_color, s.signal_color,
         )
         stamp_creatures(pixels, world, self._camera, s, self._shifts, light)
         del pixels
