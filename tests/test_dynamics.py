@@ -134,3 +134,112 @@ def test_render_flashes_writes_alpha(ready) -> None:
     center = arr[int(sy[0]), int(sx[0])]
     assert center[3] > 0  # alpha written where the flash sits
     assert tuple(center[:3]) == (10, 200, 30)
+
+
+def test_gift_line_appears_then_fades(ready) -> None:
+    """Stage 16: donor->recipient line while gifting, fade after it stops."""
+    from dataclasses import replace
+
+    from primordia.render.draw import EventTracker
+
+    cfg = replace(
+        Config(),
+        max_creatures=8,
+        initial_creatures=4,
+        width=100.0,
+        height=100.0,
+        donate_rate=0.5,
+        donate_range=3.0,
+    )
+    w = World(cfg, seed=1)
+    slots = np.flatnonzero(w.alive)
+    i, j = int(slots[0]), int(slots[1])
+    w.pos[i] = (50.0, 50.0)
+    w.pos[j] = (52.0, 50.0)
+    w.energy[i] = 10.0
+    w.actions[i, 4] = 1.0  # decoded gate
+    step.phase_rebuild_counts(w)
+    settings = _settings()
+    tracker = EventTracker(w)
+
+    step.phase_donate(w)
+    tracker.update(w, settings)
+    assert len(tracker.transfers) == 1
+    t = tracker.transfers[0]
+    assert (t.x1, t.y1, t.x2, t.y2) == (50.0, 50.0, 52.0, 50.0)
+    assert t.age == 0
+
+    # gifts stop: the recipient leaves range, so the quiet tick clears
+    # the map (Config is frozen — the mechanism is the map, not the rate)
+    w.pos[j] = (95.0, 95.0)
+    step.phase_rebuild_counts(w)
+    step.phase_donate(w)
+    for _ in range(settings.flash_duration - 1):
+        tracker.update(w, settings)
+    assert tracker.transfers  # still fading
+    assert tracker.transfers[0].age > 0
+    tracker.update(w, settings)  # age reaches the cap -> line removed
+    assert not tracker.transfers
+    assert not tracker._gifts
+
+
+def test_render_transfers_writes_alpha(ready) -> None:
+    from primordia.render.camera import Camera
+    from primordia.render.draw import Transfer, render_transfers
+    from primordia.render.settings import Settings
+
+    settings = Settings()
+    surf = pygame.Surface(
+        (settings.viewport_width, settings.viewport_height), pygame.SRCALPHA
+    )
+    surf.fill((0, 0, 0, 0))
+    w = World(Config(), seed=5)
+    camera = Camera(
+        settings,
+        w.config.width,
+        w.config.height,
+        float(w.cell_w),
+        float(w.cell_h),
+        gw=w.food.shape[1],
+        gh=w.food.shape[0],
+    )
+    cx, cy = w.config.width / 2.0, w.config.height / 2.0
+    transfers = [Transfer(x1=cx, y1=cy, x2=cx + 4.0, y2=cy, age=0)]
+    render_transfers(surf, transfers, camera, settings)
+    mx, my = camera.world_to_screen(
+        np.array([[cx + 2.0, cy]], dtype=np.float32)
+    )
+    arr = np.frombuffer(pygame.image.tobytes(surf, "RGBA"), dtype=np.uint8)
+    arr = arr.reshape(settings.viewport_height, settings.viewport_width, 4)
+    mid = arr[int(my[0]), int(mx[0])]
+    assert mid[3] > 0  # line drawn between the endpoints
+    assert tuple(mid[:3]) == settings.flash_donation
+
+
+def test_render_transfers_skips_torus_wrap(ready) -> None:
+    """A gift across the seam must not draw a line over the whole map."""
+    from primordia.render.camera import Camera
+    from primordia.render.draw import Transfer, render_transfers
+    from primordia.render.settings import Settings
+
+    settings = Settings()
+    surf = pygame.Surface(
+        (settings.viewport_width, settings.viewport_height), pygame.SRCALPHA
+    )
+    surf.fill((0, 0, 0, 0))
+    w = World(Config(), seed=5)
+    camera = Camera(
+        settings,
+        w.config.width,
+        w.config.height,
+        float(w.cell_w),
+        float(w.cell_h),
+        gw=w.food.shape[1],
+        gh=w.food.shape[0],
+    )
+    # horizontal wrap (world width 1000): raw dx = 980 > 500
+    wrapped = [Transfer(x1=990.0, y1=500.0, x2=10.0, y2=500.0, age=0)]
+    render_transfers(surf, wrapped, camera, settings)
+    arr = np.frombuffer(pygame.image.tobytes(surf, "RGBA"), dtype=np.uint8)
+    arr = arr.reshape(settings.viewport_height, settings.viewport_width, 4)
+    assert arr[:, :, 3].max() == 0  # nothing drawn

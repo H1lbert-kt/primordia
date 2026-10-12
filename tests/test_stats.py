@@ -305,7 +305,8 @@ def test_load_npz_without_ecology_columns() -> None:
                              "diet_p50", "diet_p90", "diet_p99",
                              "bite_herb", "bite_omni", "bite_pred",
                              "signal_emitted", "signal_mass", "signal_cells",
-                             "emit_mean")]
+                             "emit_mean",
+                             "donated", "donate_mean", "donate_align")]
     payload = {name: rec.to_dict()[name] for name in old_cols}
     payload["columns"] = np.array(old_cols)
     payload["seed"] = np.int64(1)
@@ -325,6 +326,7 @@ def test_load_npz_without_ecology_columns() -> None:
     assert "bite_herb" not in loaded.data
     assert "signal_emitted" not in loaded.data
     assert "signal_mass" not in loaded.data
+    assert "donated" not in loaded.data
 
 
 def test_diet_max_tracks_living_diet() -> None:
@@ -470,3 +472,30 @@ def test_signal_columns_match_world() -> None:
     assert float(data["signal_cells"][-1]) == float(
         np.count_nonzero(w.signal > 0.01 * cfg.signal_capacity)
     )
+
+
+def test_donation_columns_match_world() -> None:
+    """donated deltas sum to the counter; donate_mean/align are gauges."""
+    cfg = Config(
+        max_creatures=16,
+        initial_creatures=16,
+        width=60.0,
+        height=60.0,
+        donate_rate=0.5,
+        donate_range=20.0,  # everyone in range: pairs are guaranteed
+    )
+    w = World(cfg, seed=1)
+    rec = StatsRecorder(capacity=8, sample_every=2, sample_size=8,
+                        cluster_every=1)
+    for _ in range(5):
+        step.advance(w)
+        rec.record(w)
+    data = rec.to_dict()
+    assert np.all(data["donated"] >= 0.0)
+    assert float(data["donated"].sum()) > 0.0  # the world actually donated
+    assert float(data["donated"].sum()) == pytest.approx(
+        w.energy_donated, rel=1e-5
+    )
+    assert np.all((data["donate_mean"] >= 0.0) & (data["donate_mean"] <= 1.0))
+    assert np.all((data["donate_align"] >= -1.0) & (data["donate_align"] <= 1.0))
+    assert float(data["donate_align"][-1]) != 0.0  # pairs existed

@@ -36,6 +36,7 @@ def assert_worlds_equal(a: World, b: World) -> None:
     for name in COUNTERS:
         assert getattr(a, name) == getattr(b, name), name
     assert a.meat_eaten == b.meat_eaten
+    assert a.energy_donated == b.energy_donated
     la = a.genealogy[: a.genealogy_used]
     lb = b.genealogy[: b.genealogy_used]
     assert np.array_equal(la, lb), "genealogy"
@@ -165,6 +166,15 @@ def test_v6_save_is_rejected_clearly(tmp_path: Path) -> None:
     before the 499-column shape mismatch (stage 15 layout bump)."""
     path = tmp_path / "old.npz"
     np.savez(path, format_version=np.int32(6))
+    with pytest.raises(ValueError, match="format"):
+        load_world(str(path))
+
+
+def test_v7_save_is_rejected_clearly(tmp_path: Path) -> None:
+    """Pre-stage-16 saves have a 499-column genome; the gate must reject
+    before the 451-column shape mismatch (stage 16 layout bump)."""
+    path = tmp_path / "old.npz"
+    np.savez(path, format_version=np.int32(7))
     with pytest.raises(ValueError, match="format"):
         load_world(str(path))
 

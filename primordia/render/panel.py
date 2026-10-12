@@ -257,6 +257,7 @@ def render_panel(
             ("turn", float(np.tanh(logits[1])), True),
             ("gate", float(0.5 * (1.0 + np.tanh(logits[2]))), False),
             ("emit", float(0.5 * (1.0 + np.tanh(logits[3]))), False),
+            ("don", float(0.5 * (1.0 + np.tanh(logits[4]))), False),
         )
         for label, val, signed in outs:
             _text(dst, 16, label, x, y - 1, settings.text_dim)

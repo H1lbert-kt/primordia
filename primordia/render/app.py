@@ -33,6 +33,7 @@ from .draw import (
     pick_creature,
     pixel_format,
     render_flashes,
+    render_transfers,
     stamp_creatures,
 )
 from .panel import Hud, clear_font_cache, render_panel
@@ -205,6 +206,7 @@ def run_app(
                 settings,
             )
         render_flashes(overlay, event_tracker.flashes, camera, settings)
+        render_transfers(overlay, event_tracker.transfers, camera, settings)
         world_surface.blit(overlay, (0, 0))
         draw_overlay(world_surface, world, camera, selected, settings)
         if frames % CLUSTER_REFRESH_FRAMES == 0:

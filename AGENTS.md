@@ -14,7 +14,55 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   README principal em **inglês**.
 
 ## Estado atual do repositório (verificado em 2026-10-12)
-- **Etapa 15 ("tag/cor") concluída, commit pendente de `/cp`:** plano em
+- **Etapa 16 ("doação") concluída, commit pendente de `/cp`:** plano em
+  `.opencode/plans/etapa-16-doacao.md` (decisões do usuário: receptor =
+  **vizinho mais próximo** em `donate_range` (recepção automática, sem
+  gate do receptor), `hidden_size` **10→9** p/ caber no orçamento,
+  experimento **só `experiments/proto_culture/`**, toml
+  `signal_emit_cost` 0.5→**0.05**). **Núcleo:** `Config.donate_rate=0.0`
+  (**default off** — sigmoid nunca fecha, preço default taxaria todos;
+  validações `>=0`) + `Config.donate_range=3.0`; `N_OUTPUTS` 4→**5**
+  (gate `[4]`, scaled-sigmoid em `apply_actions`); **layout 34 in / 5
+  out / 9 hidden / 446 brain_params / 451 genoma**; fases 15→**16**
+  (nova `donate` após `emit_signal`, antes de `eat`; docstring do tick
+  renumerada). Kernel `_donate` serial sem RNG (espelha o mate search:
+  células CSR no alcance, d² toroidal exata, self excluído, empate →
+  menor slot), `t=min(donate_rate·gate, energy[i])`, conservação exata
+  (teste approx float32), retorno `(total, align_sum, pairs)` com
+  alinhamento = dot dos vetores unitários de hue. **`FORMAT_VERSION`
+  7→8** (`energy_donated` float64 salvo; v1–v7 → ValueError; docstring
+  stale "v6" corrigida). **Scratch (não salvos):** `donate_to (N,)
+  int32` (mapa doador→receptor p/ render, fill(-1) a cada tick,
+  custo 0.75 µs no caminho default) + `donate_align_sum/donate_pairs`.
+  **Stats:** `donated` (delta), `donate_mean` (gate médio vivos),
+  `donate_align` (mean dos pares, 0 sem pares). **Render:** linhas
+  cyan `flash_donation` donor→receptor via `EventTracker.transfers`
+  (idade por doador, fade `flash_duration`, **skip de wrap do torus**
+  — artefato pego no screenshot), painel ganha linha `don` +
+  `W2|b2 (5x10)`; `plot.py` intocado. **Testes: 183 passed** (18 novos:
+  `tests/test_donation.py` 12 — conservação, no-op, nearest/empate,
+  clamp, faixa, fórmulas 5/446/451, determinismo, gift map, continuation
+  v8 bit-a-bit; v7→ValueError em `test_io`; colunas stats; painel
+  `don`; transfers lifecycle + wrap + alpha em `test_dynamics`); pins
+  494/499→446/451, 15→16 fases. **Bench** (load 1.1–4.6, amostras
+  oscilam 2–4× — 2ª amostra N=5000 > N=2000 = ruído): **965–1374 /
+  349–577 / 139–352** a 500/2000/5000; fase `donate` medida isolada:
+  0.75 µs (rate=0) / ~24 µs (ativa ≈ reproduce). **Experimento
+  `experiments/proto_culture/`** (off/cheap 0.02/dear 0.10 sobre toml
+  0.05, seeds 42/7/13, piloto 800 + gate 10k, caches em `data/`):
+  **HARD GATE PASS** (9/9 vivos, min 121–137, pops finais 845/827/887
+  médias); **H1 refutada em cheap** (gate 0.708→0.737 *subiu*) e fraca
+  em dear (0.706→0.666, −6%); **H2 confirmada**: align 0.511/0.540 vs
+  chance `(1−hue_spread)²` 0.108/0.208 = **4.7×/2.6×** (gifts p/ parentes;
+  figura suavizada 201-tick); context: pop/energia ~igual controle,
+  predation 994/650/971 e barrier 0.092/0.032/0.071 divergem mas n=3 =
+  noise (documentado). README do experimento com 5 limitações; README
+  principal: 451/34/183/bench 16/roadmap 1–16 + `proto_culture` na
+  lista de reprodução. GIF demo não regenerado (default = doação off,
+  visual idêntico à 15). **Próximo passo do usuário: `/cp`**, depois
+  civilização/daemon/território/Oja.
+- **Etapa 15 ("tag/cor") concluída, commitada em `origin/master`
+  (`f2f4554`):** plano em
   `.opencode/plans/etapa-15-tag-cor.md` (decisões fechadas pelo usuário:
   5º traço `tag_hue ∈ [0,1)`, **sem campo no chão**, **1 input** de
   similaridade lendo vizinhos diretos na janela de cheiro (self-excluded),
@@ -775,6 +823,7 @@ antes de dizer que uma mudança de tick não regrediu desempenho.
 Roadmap "mundo real" aprovado (`.opencode/plans/roadmap-mundo-real.md`):
 10 ambiente (terreno/estações/luz) ✓ → 11 biologia (sexualidade/senescência/carniça) ✓
 → 12 ecologia (ciclos tróficos) ✓ → 13 canal ✓ → 14 difusão ✓ →
-15 tag/cor ✓ → 16 doação + `experiments/proto_culture/`.
+15 tag/cor ✓ → 16 doação + `experiments/proto_culture/` ✓ (próxima:
+civilização/daemon/território/Oja, a decidir com o usuário).
 
 Trabalhe **apenas na etapa que o usuário indicar**.

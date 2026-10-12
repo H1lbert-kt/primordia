@@ -207,6 +207,9 @@ class World:
         # long runs do not lose counts, same pattern as meat_eaten. Saved
         # as a scalar in io.py.
         self.signal_emitted = 0.0
+        # Total energy ever gifted to neighbours (stage 16 gate metric);
+        # float64, saved as a scalar in io.py, same pattern.
+        self.energy_donated = 0.0
         # Cumulative bites by the *attacker's* diet class (stage 12.5):
         # [herbivore (< HERB_MAX), omnivore, predator (> PRED_MIN)] — the
         # measurement buckets of ecology.py, int64 counts of successful
@@ -214,6 +217,20 @@ class World:
         # deliberately not saved (io.py): a resumed run restarts the
         # stats baseline at 0, same as the recorder does.
         self.bite_by_diet = np.zeros(3, dtype=np.int64)
+        # Per-tick donation diagnostics (stage 16): sum of the circular
+        # hue alignment over gift events plus the event count, reset by
+        # the donate phase each tick so stats can read the last tick's
+        # values. Diagnostic only, not saved (io.py), same contract as
+        # bite_by_diet.
+        self.donate_align_sum = 0.0
+        self.donate_pairs = 0
+        # Per-tick gift map for the renderer (stage 16): donor slot ->
+        # recipient slot, -1 otherwise, rewritten every tick by the
+        # donate phase (always cleared, even when the rate is 0). The
+        # simulation never reads it; only the overlay draws transfer
+        # lines from it, so recording stays bit-identical to headless.
+        # Diagnostic scratch, not saved (io.py), like bite_by_diet.
+        self.donate_to = np.full(config.max_creatures, -1, dtype=np.int32)
 
         # Genealogy (stage 7): birth-id allocator plus the pre-allocated
         # birth log; _reproduce writes rows through the cursor in-place.

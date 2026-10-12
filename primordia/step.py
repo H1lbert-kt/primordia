@@ -29,16 +29,20 @@ profiler in ``bench``):
         drained from energy at signal_emit_cost * gate, stage 13 — the
         deposit is only visible to perceive from the *next* tick, since
         perceive already ran; the contract is deliberate, never reordered)
-    10. eat             (serial: shared cells; food first, then carrion;
+    10. donate          (serial: gift donate_rate * gate to the nearest
+        living neighbour within donate_range, stage 16 — energy moves in
+        the same tick, no latency; who may receive is physics, whether to
+        give is the gate)
+    11. eat             (serial: shared cells; food first, then carrion;
         extraction * gate)
-    11. bite            (serial: contact predation; gate * diet budget, energy
+    12. bite            (serial: contact predation; gate * diet budget, energy
        transfer at bite_efficiency, the dissipating share lands as carrion,
        prey at 0 energy is killed here and counted as predation)
-    12. integrate motion + wrap borders (parallel, alive only)
-    13. deaths          (serial: kill, deposit leftover body energy as carrion,
+    13. integrate motion + wrap borders (parallel, alive only)
+    14. deaths          (serial: kill, deposit leftover body energy as carrion,
        zero energy, push slot to free-list)
-    14. reproduce       (serial: energy >= threshold -> nearest partner within
-       mate_range -> child; uses the slots freed in phases 10 and 13;
+    15. reproduce       (serial: energy >= threshold -> nearest partner within
+       mate_range -> child; uses the slots freed in phases 11 and 14;
        newborns skip perceive/think until the next tick)
 
 Perception uses positions from the start of the tick, movement is applied
@@ -285,6 +289,127 @@ def _emit_signal(
     return emitted
 
 
+@njit(cache=True)
+def _donate(
+    pos: np.ndarray,
+    energy: np.ndarray,
+    alive: np.ndarray,
+    actions: np.ndarray,
+    hue_re: np.ndarray,
+    hue_im: np.ndarray,
+    cell_offsets: np.ndarray,
+    cell_slots: np.ndarray,
+    donate_to: np.ndarray,
+    inv_cell_w: np.float32,
+    inv_cell_h: np.float32,
+    gw: np.int32,
+    gh: np.int32,
+    width: np.float32,
+    height: np.float32,
+    reach_x: np.int32,
+    reach_y: np.int32,
+    donate_rate: np.float32,
+    donate_range: np.float32,
+) -> tuple[float, float, int]:
+    """Serial: every donor gifts its nearest living neighbour in range.
+
+    The donate gate (output 4, decoded in apply_actions) scales the gift
+    ``donate_rate * gate`` (stage 16 — the tick opens a physical transfer,
+    never rewards giving). The recipient is the nearest living creature
+    within ``donate_range`` by exact toroidal distance over the CSR cells:
+    self excluded, ties to the lower slot — the mate search's rule, so the
+    choice of *who can receive* is pure physics and kin (born in place,
+    clustered by stage 15) are what "nearest" happens to mean. The donor
+    pays at most what it has, so a gift can empty it; the deaths phase
+    comes later and then finds nothing to deposit — the energy is already
+    with the recipient, so the transfer conserves the world total up to
+    float rounding. Returns ``(total, align_sum, pairs)`` where alignment
+    is the dot of the two unit hue vectors (the stage-15 similarity
+    metric): the experiment reads it against the global chance level to
+    see whether gifts follow colour or not.
+    """
+    total = np.float32(0.0)
+    align_sum = np.float64(0.0)
+    pairs = 0
+    if donate_rate <= 0.0:
+        return total, align_sum, pairs
+    hw = width * np.float32(0.5)
+    hh = height * np.float32(0.5)
+    range2 = donate_range * donate_range
+
+    for i in range(alive.size):
+        if not alive[i]:
+            continue
+        gate = actions[i, 4]
+        avail = energy[i]
+        if gate <= 0.0 or avail <= 0.0:
+            continue
+        # nearest living neighbour within donate_range (mirror of the mate
+        # search: CSR cells in reach, exact toroidal distance, no self)
+        px = pos[i, 0]
+        py = pos[i, 1]
+        ix0 = int(px * inv_cell_w)
+        iy0 = int(py * inv_cell_h)
+        if ix0 < 0:
+            ix0 = 0
+        elif ix0 >= gw:
+            ix0 = gw - 1
+        if iy0 < 0:
+            iy0 = 0
+        elif iy0 >= gh:
+            iy0 = gh - 1
+        best_j = -1
+        best_d2 = np.float32(np.inf)
+        for dy in range(-reach_y, reach_y + 1):
+            iy = iy0 + dy
+            while iy < 0:
+                iy = iy + gh
+            while iy >= gh:
+                iy = iy - gh
+            for dx in range(-reach_x, reach_x + 1):
+                ix = ix0 + dx
+                while ix < 0:
+                    ix = ix + gw
+                while ix >= gw:
+                    ix = ix - gw
+                k = iy * gw + ix
+                for p in range(cell_offsets[k], cell_offsets[k + 1]):
+                    j = cell_slots[p]
+                    if j == i or not alive[j]:
+                        continue
+                    ddx = px - pos[j, 0]
+                    if ddx > hw:
+                        ddx = ddx - width
+                    elif ddx < -hw:
+                        ddx = ddx + width
+                    ddy = py - pos[j, 1]
+                    if ddy > hh:
+                        ddy = ddy - height
+                    elif ddy < -hh:
+                        ddy = ddy + height
+                    d2 = ddx * ddx + ddy * ddy
+                    if d2 <= range2 and (
+                        d2 < best_d2 or (d2 == best_d2 and j < best_j)
+                    ):
+                        best_d2 = d2
+                        best_j = j
+        if best_j < 0:
+            continue
+        j = best_j
+        amount = donate_rate * gate
+        if amount > avail:
+            amount = avail
+        energy[i] = avail - amount
+        energy[j] = energy[j] + amount
+        total = total + amount
+        align_sum = align_sum + np.float64(
+            hue_re[i] * hue_re[j] + hue_im[i] * hue_im[j]
+        )
+        pairs = pairs + 1
+        donate_to[i] = j  # renderer-only gift map, cleared each tick
+    return total, align_sum, pairs
+
+
 @njit(cache=True, parallel=True)
 def _integrate(
     pos: np.ndarray,
@@ -518,6 +643,48 @@ def phase_emit_signal(world: World) -> None:
         np.float32(cfg.signal_emit_cost),
     )
     world.signal_emitted += float(emitted)
+
+
+def phase_donate(world: World) -> None:
+    cfg = world.config
+    world.donate_to.fill(-1)  # fresh map: render sees only this tick's gifts
+    if cfg.donate_rate <= 0.0:
+        # default off: no kernel call at all; the scratch is reset so
+        # stats never reads last tick's values (same as a quiet tick)
+        world.donate_align_sum = 0.0
+        world.donate_pairs = 0
+        return
+    gh, gw = world.cell_counts.shape
+    # Cells to scan per axis so the largest allowed gift range can never
+    # be missed across cell edges (same reach formula as the bite phase).
+    reach_x = int(cfg.donate_range // float(world.cell_w)) + 1
+    reach_y = int(cfg.donate_range // float(world.cell_h)) + 1
+    reach_x = min(reach_x, gw // 2)
+    reach_y = min(reach_y, gh // 2)
+    total, align_sum, pairs = _donate(
+        world.pos,
+        world.energy,
+        world.alive,
+        world.actions,
+        world.hue_re,
+        world.hue_im,
+        world.cell_offsets,
+        world.cell_slots,
+        world.donate_to,
+        np.float32(1.0 / world.cell_w),
+        np.float32(1.0 / world.cell_h),
+        np.int32(gw),
+        np.int32(gh),
+        np.float32(cfg.width),
+        np.float32(cfg.height),
+        np.int32(reach_x),
+        np.int32(reach_y),
+        np.float32(cfg.donate_rate),
+        np.float32(cfg.donate_range),
+    )
+    world.energy_donated += float(total)
+    world.donate_align_sum = float(align_sum)
+    world.donate_pairs = int(pairs)
 
 
 def phase_eat(world: World) -> None:
@@ -807,6 +974,7 @@ PHASES = (
     ("think", phase_think),
     ("apply_actions", phase_apply_actions),
     ("emit_signal", phase_emit_signal),
+    ("donate", phase_donate),
     ("eat", phase_eat),
     ("bite", phase_bite),
     ("integrate", phase_integrate),

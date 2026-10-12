@@ -22,12 +22,12 @@ pytest -q
 - **No fitness, no objectives.** Energy is the only currency: eat food (or
   meat), pay metabolic and movement costs, and split when you cross
   `reproduce_threshold`. Death = energy ≤ 0, `max_age`, or a predator's bite.
-- **Evolvable body and brain.** Each creature is a genome of 499 values: a
+- **Evolvable body and brain.** Each creature is a genome of 451 values: a
   34-input network (7-ray food sum, creatures, prey and carrion peak
   channels, left/right food antennas, internal state, ambient light, three
   signal-field sensors, and the hue similarity of neighbours in the smell
-  window) → 10 hidden units with Elman recurrence →
-  turn, accelerate, eat/attack, emit signal — plus
+  window) → 9 hidden units with Elman recurrence →
+  turn, accelerate, eat/attack, emit signal, donate energy — plus
   body traits: max speed, size, vision range, *diet* (0 = herbivore;
   predation capability is itself a trait that has to evolve) and a
   heritable lineage hue — neutral by construction (nothing in the tick
@@ -69,7 +69,9 @@ limitations in each experiment's README.
 > (33 inputs, a 4th brain output, `FORMAT_VERSION 6`), and stage 14 made
 > that channel diffuse — a Jacobi pass spreads the field into trails
 > (config-only, `FORMAT_VERSION` stays 6), while stage 15 added a neutral
-> lineage hue (34 inputs, a 5th body trait, `FORMAT_VERSION 7`). The experiment
+> lineage hue (34 inputs, a 5th body trait, `FORMAT_VERSION 7`) and stage
+> 16 opened a donation channel (a 5th brain output gifting energy to the
+> nearest neighbour, 9 hidden units, `FORMAT_VERSION 8`). The experiment
 > scripts pin the old regime
 > off via `STAGE8_BASE` so the *regime* is preserved — but reruns on current
 > HEAD use the sexual dynamics; the original asexual runs stay in each
@@ -178,17 +180,20 @@ the whole scene dims with the day/night cycle shown as `light` in the HUD.
 
 Target: ≥ 30 ticks/s at 2000 creatures headless (i5-8265U, no GPU).
 
-| creatures | ticks/s (load 4.3–4.9, stage-15 hue sensor active) |
+| creatures | ticks/s (load 1.1–4.6, stage-16 default: donation off) |
 |---|---|
-| 500 | 922–1250 |
-| 2000 | 464–490 |
-| 5000 | 258–287 |
+| 500 | 965–1374 |
+| 2000 | 349–577 |
+| 5000 | 139–352 |
 
 Numbers vary 2–4× between processes depending on machine load (this box runs
-a desktop session); compare A/B in the same session. Stage 15 adds two
-array reads per creature to the smell window (hue real/imag sums) and lands
-at or above the stage-14 table (794–1106 / 465–491 / 166–303, different
-session) — no measurable regression. The stage-10 economy
+a desktop session); compare A/B in the same session. Stage 16's default
+world pays 0.75 µs/tick for the donate phase's map reset (measured in
+process, rate=0 fast path) and ~24 µs/tick when gifts are active — the wide
+bench range above is process noise, not the new phase (the second sample of
+the day even ran N=5000 faster than N=2000). Stage 15 (two array reads per
+creature in the smell window) landed at 464–490 @N=2000 in its session —
+no measurable regression attributable to stage 16. The stage-10 economy
 holds different populations than older tables during a 1000-tick bench
 (alive_final 223/597/1203), so they are not directly comparable to earlier
 runs. `python -m primordia.bench [--profile]` reproduces the table.
@@ -202,6 +207,8 @@ python experiments/mutation_diversity/run.py
 python experiments/predation/run.py
 python experiments/lineage/run.py
 python experiments/tags/run.py          # stage 15: neutral lineage hue
+python experiments/proto_culture/run.py --phase pilot  # stage 16: donation
+python experiments/proto_culture/run.py --phase gate
 
 # stats + plots
 python run.py --seed 42 --headless --ticks 5000 --stats s42.npz
@@ -227,7 +234,7 @@ primordia/
   config.py   world.py   genome.py   brain.py   sensors.py
   step.py     stats.py   io.py       bench.py   ecology.py
   render/     # pygame viewer + headless GIF recorder (never imported by core)
-tests/        # 165 tests: determinism, invariants, save/load, guards
+tests/        # 183 tests: determinism, invariants, save/load, guards
 experiments/  # one script + README per experiment
 run.py        # CLI: --seed --headless --ticks --load --save --stats
               #      --config --record --screenshot --select
@@ -235,7 +242,7 @@ run.py        # CLI: --seed --headless --ticks --load --save --stats
 
 ## Roadmap status
 
-Stages 1–15 of the plan are implemented: world+food, brain+sensors,
+Stages 1–16 of the plan are implemented: world+food, brain+sensors,
 genome+reproduction, viewer, evolvable predation, stats/plots,
 save/load+genealogy, experiments/demo/publication, the guided-world stage
 (persistent food patches, richer senses, Elman recurrence, a richer
@@ -247,13 +254,19 @@ genome clustering, reproductive-barrier metric — no new tick logic,
 measured results in `experiments/ecology/`), the signal channel (stage 13:
 a scalar emit gate and smell sensors, no reward), pheromone diffusion
 (stage 14: the field spreads into trails — physics confirmed in
-`experiments/trails/`, interpretation still null at 10k), and the lineage
+`experiments/trails/`, interpretation still null at 10k), the lineage
 hue (stage 15: a neutral heritable colour plus a neighbour-hue-similarity
 input and sprite rings — no reward anywhere, yet in 3 seeds × 10k
 (`experiments/tags/`) families occupy windows 9–23× denser than a random
 spawn and hues align 1.5–19× beyond spacing alone, while global diversity
-drifts seed-dependently; structure ≠ sensor use, stated as a limitation).
-The "real world" roadmap continues with stage 16 (donation). Known open
+drifts seed-dependently; structure ≠ sensor use, stated as a limitation),
+and donation (stage 16: a 5th brain output gifts energy to the nearest
+neighbour — in 3 seeds × 10k (`experiments/proto_culture/`) the channel
+survives at both prices, gift pairs align 2.6–4.7× beyond chance (kin
+receives), the cheap gate does not close while the dear one falls only
+6% — selection against the leak exists but is slow; the tick never
+rewards giving). The "real world" roadmap continues with civilization /
+daemon / territory / Oja. Known open
 problems are documented above (predation still a trickle, creatures still
 circle) rather than hidden.
 

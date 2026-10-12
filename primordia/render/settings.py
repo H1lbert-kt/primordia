@@ -78,6 +78,9 @@ class Settings:
     flash_famine: tuple[int, int, int] = (240, 170, 70)
     flash_age: tuple[int, int, int] = (180, 180, 200)
     flash_predation: tuple[int, int, int] = (240, 90, 80)
+    # donation gift lines (stage 16): cyan, distinct from the four
+    # point-flash colors above (especially predation red)
+    flash_donation: tuple[int, int, int] = (90, 210, 230)
 
     # world sparkline (alive + mean energy, one sample per rendered frame)
     sparkline_samples: int = 300

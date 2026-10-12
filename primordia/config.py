@@ -18,7 +18,7 @@ class Config:
     a single source of truth.
     """
 
-    N_OUTPUTS: ClassVar[int] = 4  # accel, turn, eat-gate, emit-gate (stage 13)
+    N_OUTPUTS: ClassVar[int] = 5  # accel, turn, eat-gate, emit-gate, donate-gate
     N_BODY_TRAITS: ClassVar[int] = 5  # max_speed, size, vision_range, diet, tag_hue
 
     # --- world geometry ---
@@ -95,9 +95,10 @@ class Config:
     smell_radius_cells: int = 1  # (2r+1)^2 cells sensed around the creature
 
     # --- brain ---
-    # 10 keeps brain_params at 494 (with the 34 inputs + 4 outputs + W_rec),
-    # inside the 100-500 parameter budget; 12 would push it well beyond.
-    hidden_size: int = 10
+    # 9 keeps brain_params at 446 (34 inputs + 5 outputs + W_rec), inside
+    # the 100-500 parameter budget; 10 with stage 16's donate gate would
+    # push it to 505, over budget.
+    hidden_size: int = 9
     weight_init_std: float = 0.5  # std of N(0, std) weights drawn at spawn
 
     # --- locomotion (cinematic: vel = dir(angle) * max_speed * accel) ---
@@ -169,6 +170,15 @@ class Config:
     # stable only for rate <= 0.25 (the highest Laplacian mode is critically
     # damped there, 1 + rate*(-4) = 0). 0 disables diffusion exactly.
     signal_diffuse: float = 0.1
+
+    # --- donation (stage 16: physical energy transfer, never a reward) ---
+    # The donate gate (output 4) is a sigmoid that never reaches exactly 0,
+    # so the default rate is 0 — same reasoning as signal_emit_cost: a
+    # nonzero default would drain every creature from birth. Experiments
+    # set the price; the recipient is the nearest living neighbour inside
+    # donate_range (the mate search's rule), chosen by physics, not by us.
+    donate_rate: float = 0.0  # energy gifted per tick at gate=1
+    donate_range: float = 3.0  # world units, nearest living recipient
 
     # --- species clustering (stage 12: metric only, never read by the tick) ---
     # Normalized genome distance at or below which two living creatures are
@@ -262,6 +272,10 @@ class Config:
             raise ValueError("signal_capacity must be positive")
         if not 0.0 <= self.signal_diffuse <= 0.25:
             raise ValueError("signal_diffuse must be in [0, 0.25]")
+        if self.donate_rate < 0.0:
+            raise ValueError("donate_rate must be >= 0")
+        if self.donate_range < 0.0:
+            raise ValueError("donate_range must be >= 0")
         if self.species_threshold <= 0.0:
             raise ValueError("species_threshold must be positive")
         if self.genealogy_capacity < 0:

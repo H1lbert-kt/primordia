@@ -1,14 +1,16 @@
 """Save and load the entire world as a versioned ``.npz`` (stage 7).
 
-Format v7 stores exactly what is needed to continue a run bit-for bit
+Format v8 stores exactly what is needed to continue a run bit-for bit
 (v2 added ``food_field`` and ``hidden_prev``; v3 adds ``terrain``, the
 stage-10 geography; v4 adds ``meat`` and ``meat_eaten``, the stage-11
 carrion cycle; v5 widens the genealogy log to 4 columns so both parents
 are recorded, the stage-12 reproductive-barrier metric; v6 adds ``signal``
 and ``signal_emitted``, the stage-13 communication field; v7 is a layout
 bump — the stage-15 tag adds a body trait, so ``genome`` grows from 488
-to 499 columns and the old width would mismatch on load; readers reject
-older versions with a clear message):
+to 499 columns and the old width would mismatch on load; v8 adds the
+stage-16 ``energy_donated`` counter and the 5-output/9-hidden layout
+shrinks the genome to 451 columns; readers reject older versions with a
+clear message):
 
     format_version  int32 scalar; readers reject other versions
     config_json     Config as JSON (rebuilds every balance parameter)
@@ -20,6 +22,7 @@ older versions with a clear message):
                     int64 scalars
     meat_eaten      float64 scalar (cumulative carrion energy extracted)
     signal_emitted  float64 scalar (cumulative signal deposited)
+    energy_donated  float64 scalar (cumulative energy gifted to neighbours)
     pos vel angle energy age genome species_id parent_id creature_id
     alive free_list food food_field terrain meat signal hidden_prev
                     the SoA state arrays
@@ -54,7 +57,7 @@ from .config import Config
 from .genome import get_numba_rng_state, set_numba_rng_state
 from .world import World
 
-FORMAT_VERSION = 7
+FORMAT_VERSION = 8
 
 _INT_SCALARS = (
     "seed",
@@ -68,7 +71,7 @@ _INT_SCALARS = (
     "genealogy_used",
     "genealogy_overflow",
 )
-_FLOAT_SCALARS = ("meat_eaten", "signal_emitted")
+_FLOAT_SCALARS = ("meat_eaten", "signal_emitted", "energy_donated")
 _ARRAYS = (
     "pos",
     "vel",
@@ -91,7 +94,7 @@ _ARRAYS = (
 
 
 def save_world(world: World, path: str) -> None:
-    """Write the full simulation state to ``path`` (npz, format v6)."""
+    """Write the full simulation state to ``path`` (npz, format v8)."""
     payload: dict[str, np.ndarray] = {
         "format_version": np.int32(FORMAT_VERSION),
         "config_json": np.array(json.dumps(asdict(world.config), sort_keys=True)),

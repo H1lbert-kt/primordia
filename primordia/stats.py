@@ -18,6 +18,14 @@ one row per recorded tick in pre-allocated int32/float32 columns:
                       diffusion spreads it; stage 14 pheromone metric)
     emit_mean        (mean emit-gate fraction over living creatures, from
                       the last think's logits — reads 0 when nothing lives)
+    donated          (per-tick delta of World.energy_donated, stage 16:
+                      energy gifted to neighbours this tick)
+    donate_mean      (mean donate-gate fraction over living creatures,
+                      from the last think's logits — reads 0 when none)
+    donate_align     (mean circular hue alignment of this tick's gift
+                      pairs, from World.donate_align_sum/donate_pairs;
+                      0 without pairs, in [-1, 1] — the H2 gauge the
+                      proto_culture experiment compares to chance)
     bite_herb, bite_omni, bite_pred
                      (per-tick deltas of World.bite_by_diet, stage 12.5:
                      successful takes grouped by the *attacker's* diet class)
@@ -102,6 +110,9 @@ FLOAT_COLUMNS = (
     "signal_mass",
     "signal_cells",
     "emit_mean",
+    "donated",
+    "donate_mean",
+    "donate_align",
     "hue_mean",
     "hue_spread",
     "tag_sim_mean",
@@ -167,6 +178,7 @@ class StatsRecorder:
         self._prev_meat = np.float64(0.0)  # cumulative meat_eaten delta baseline
         self._prev_bite = np.zeros(3, dtype=np.int64)  # bite_by_diet baseline
         self._prev_signal = np.float64(0.0)  # signal_emitted delta baseline
+        self._prev_donated = np.float64(0.0)  # energy_donated delta baseline
         self._last_dist = np.float32(0.0)
         self._last_diet_p = (np.float32(0.0), np.float32(0.0), np.float32(0.0))
         self._last_n_species = np.float32(0.0)
@@ -260,6 +272,9 @@ class StatsRecorder:
             cols["emit_mean"][i] = np.float32(
                 0.5 * (1.0 + np.tanh(world.actions[alive, 3])).mean()
             )
+            cols["donate_mean"][i] = np.float32(
+                0.5 * (1.0 + np.tanh(world.actions[alive, 4])).mean()
+            )
             # tag hue as a circular variable (stage 15): the arithmetic
             # mean of an angle would land mid-wheel for a bimodal spread
             hue = world.genome[alive, world.config.brain_params + 4]
@@ -292,6 +307,7 @@ class StatsRecorder:
             cols["n_predator"][i] = 0
             cols["diet_max"][i] = 0.0
             cols["emit_mean"][i] = 0.0
+            cols["donate_mean"][i] = 0.0
             cols["hue_mean"][i] = 0.0
             cols["hue_spread"][i] = 0.0
             cols["tag_sim_mean"][i] = 0.0
@@ -313,6 +329,15 @@ class StatsRecorder:
             world.signal_emitted - self._prev_signal
         )
         self._prev_signal = np.float64(world.signal_emitted)
+        cols["donated"][i] = np.float32(world.energy_donated - self._prev_donated)
+        self._prev_donated = np.float64(world.energy_donated)
+        # mean hue alignment of this tick's gift pairs (stage 16 H2 gauge);
+        # 0 without pairs — never NaN, so plots stay monotone-free of holes
+        cols["donate_align"][i] = np.float32(
+            world.donate_align_sum / world.donate_pairs
+            if world.donate_pairs
+            else 0.0
+        )
         # full-field sum: 40k float32 adds (~40 µs), cheap next to record's
         # existing trait means; the mass shows whether the field is alive
         cols["signal_mass"][i] = np.float32(world.signal.sum(dtype=np.float64))

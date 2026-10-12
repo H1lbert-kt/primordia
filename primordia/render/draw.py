@@ -427,6 +427,22 @@ class Flash:
     age: int = 0
 
 
+@dataclass
+class Transfer:
+    """One donation gift (stage 16): donor->recipient endpoints, frame age.
+
+    Rebuilt from ``world.donate_to`` every frame, so the line follows the
+    live positions of both creatures; ``age`` counts frames since the
+    donor's last gift and drives the fade in :func:`render_transfers`.
+    """
+
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+    age: int = 0
+
+
 class EventTracker:
     """Render-side birth/death flashes from successive alive masks.
 
@@ -439,6 +455,10 @@ class EventTracker:
         self.prev_alive = world.alive.copy()
         self.prev_counters = self._counters(world)
         self.flashes: deque[Flash] = deque()
+        # donation gift lines (stage 16), rebuilt each update from the
+        # per-tick world.donate_to map: donor -> [recipient, frames_since_last_gift]
+        self._gifts: dict[int, list[int]] = {}
+        self.transfers: list[Transfer] = []
 
     @staticmethod
     def _counters(world) -> tuple[int, int, int]:
@@ -485,6 +505,43 @@ class EventTracker:
 
         self.prev_alive = alive.copy()
         self.prev_counters = self._counters(world)
+        self._update_transfers(world, settings)
+
+    def _update_transfers(self, world, settings: Settings) -> None:
+        """Rebuild the donor->recipient gift lines from the tick's map.
+
+        An active donor resets to age 0 every frame (the line persists
+        while it keeps giving, tracking both live positions); once the
+        gifts stop, the line fades over ``flash_duration`` frames. A
+        dead donor expires immediately — its slot may already belong to
+        somebody else. Reading the render-only scratch never perturbs
+        the simulation, same contract as the rest of this class.
+        """
+        gift_map = world.donate_to
+        alive = world.alive
+        active = {int(d): int(gift_map[d]) for d in np.flatnonzero(gift_map >= 0)}
+        for d, r in active.items():
+            self._gifts[d] = [r, 0]
+        for d in list(self._gifts):
+            if d in active:
+                continue
+            if d >= alive.size or not alive[d]:
+                del self._gifts[d]
+                continue
+            self._gifts[d][1] += 1
+            if self._gifts[d][1] >= settings.flash_duration:
+                del self._gifts[d]
+        pos = world.pos
+        self.transfers = [
+            Transfer(
+                float(pos[d, 0]),
+                float(pos[d, 1]),
+                float(pos[r, 0]),
+                float(pos[r, 1]),
+                age,
+            )
+            for d, (r, age) in self._gifts.items()
+        ]
 
     def _death_color(self, world, settings: Settings) -> tuple[int, int, int]:
         """Dominant cause of this frame's deaths (per-slot causes are not
@@ -566,3 +623,45 @@ def render_flashes(
         cx, cy = int(sx[0]), int(sy[0])
         color = (f.color[0], f.color[1], f.color[2], alpha)
         pygame.draw.circle(overlay, color, (cx, cy), radius)
+
+
+def render_transfers(
+    overlay: pygame.Surface,
+    transfers: list[Transfer],
+    camera: Camera,
+    settings: Settings,
+) -> None:
+    """Cyan donor->recipient gift lines (stage 16), fading with age.
+
+    Fresh gifts (age 0, the ones the tick just made) draw slightly
+    thicker; older lines thin out and fade as ``age`` approaches
+    ``flash_duration``. Skip entirely when nothing donated — the default
+    donate_rate is 0, so this is a no-op in vanilla runs.
+    """
+    if not transfers:
+        return
+    color = settings.flash_donation
+    duration = max(1, settings.flash_duration)
+    half_w = camera.world_width * 0.5
+    half_h = camera.world_height * 0.5
+    for t in transfers:
+        fade = 1.0 - t.age / duration
+        if fade <= 0.0:
+            continue
+        # torus seam: a "nearest" gift across the wrap would draw a line
+        # over the whole map — skip it, same rule as draw_trail
+        if abs(t.x1 - t.x2) > half_w or abs(t.y1 - t.y2) > half_h:
+            continue
+        alpha = int(190.0 * fade)
+        sx, sy = camera.world_to_screen(
+            np.array([[t.x1, t.y1], [t.x2, t.y2]], dtype=np.float32)
+        )
+        p1 = (int(sx[0]), int(sy[0]))
+        p2 = (int(sx[1]), int(sy[1]))
+        pygame.draw.line(
+            overlay,
+            (color[0], color[1], color[2], alpha),
+            p1,
+            p2,
+            2 if t.age == 0 else 1,
+        )

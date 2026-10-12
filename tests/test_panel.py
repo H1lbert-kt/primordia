@@ -132,3 +132,30 @@ def test_panel_shows_cluster_when_cached(ready_world: World) -> None:
     # The inspection line must not keep the vestigial "species 0" id label;
     # the WORLD HUD's "species K" gauge line is a different, intended string.
     assert not any("species 0" in m for m in with_cache + without)
+
+
+def test_panel_shows_don_gate_and_w2_layout(ready_world: World) -> None:
+    """Stage 16: the outputs list gains the `don` gate and W2 is 5 wide."""
+    from primordia.render import panel as P
+    from primordia.render.settings import Settings
+
+    settings = Settings()
+    slot = int(np.flatnonzero(ready_world.alive)[0])
+    messages: list[str] = []
+    original = P._text
+
+    def spy(dst, size, msg, x, y, color):
+        messages.append(msg)
+        return original(dst, size, msg, x, y, color)
+
+    P._text = spy
+    try:
+        surf = pygame.Surface((settings.panel_width, settings.window_height))
+        hud = P.Hud(fps=60.0, speed=1, paused=False, follow=False, seed=42)
+        P.render_panel(surf, ready_world, slot, hud, settings)
+    finally:
+        P._text = original
+
+    assert "don" in messages, "donate gate missing from the outputs list"
+    assert any("W2|b2 (5x10)" in m for m in messages), messages
+    assert any("W_rec (9x9)" in m for m in messages), messages

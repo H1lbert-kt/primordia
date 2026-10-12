@@ -13,7 +13,13 @@
 # 0 (the sigmoid gate never closes exactly, so a default cost would tax
 # every creature); this file is where the price is set.
 #
+# Stage 16 note: the price drops from 0.5 to 0.05 — stage 14's price
+# sweep showed 0.5 collapses the population (33 alive at 10k in stage 13)
+# while 0.05 survives to 10k with the gate still being paid for. The
+# donation treatment (donate_rate) is not set here: it is the experiment's
+# variant axis (experiments/proto_culture), and its Config default is 0.
+#
 # Usage:  python run.py --config configs/proto_culture.toml ...
 bite_rate = 12.0
 contact_range = 2.5
-signal_emit_cost = 0.5
+signal_emit_cost = 0.05

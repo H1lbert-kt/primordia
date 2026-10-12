@@ -14,8 +14,8 @@ tick's hidden state (``hidden_prev``) through ``W_rec``, then the new state
 is committed back — short-term memory without any new randomness.
 ``think`` stores raw output logits in ``actions``; ``apply_actions`` maps them
 to motion (cinematic: vel = dir(angle) * max_speed * accel), converts the
-eat and emit logits into gates in ``(0, 1)`` (stage 13 added the emit gate,
-output 3, decoded with the same scaled sigmoid as the eat gate), and
+eat, emit and donate logits into gates in ``(0, 1)`` (stages 13/16 added
+outputs 3 and 4, decoded with the same scaled sigmoid as the eat gate), and
 drains ``turn_cost`` energy per radian turned (steering is a physical cost,
 stage 9.5).
 No random numbers are drawn in this module.
@@ -92,9 +92,10 @@ def apply_actions(
     rotated), so perpetual spinning starves — a physical law, never a fitness
     term (stage 9.5). Senescence (stage 11): effective top speed shrinks by
     the wear factor ``w = exp(senescence_rate * age)`` — old bodies move
-    slower; rate 0 restores stage-10 speed exactly. The eat gate (output 2)
-    and the emit gate (output 3, stage 13) are both mapped with the same
-    scaled sigmoid into ``(0, 1)``; step decides what each one spends.
+    slower; rate 0 restores stage-10 speed exactly. The eat gate (output 2),
+    emit gate (output 3, stage 13) and donate gate (output 4, stage 16) are
+    all mapped with the same scaled sigmoid into ``(0, 1)``; step decides
+    what each one spends.
     """
     tau = np.float32(2.0 * np.pi)
     for i in prange(alive.size):
@@ -107,6 +108,9 @@ def apply_actions(
         # emit gate (stage 13): same transform as the eat gate; step's
         # emit_signal phase reads actions[i, 3] as the deposit fraction
         actions[i, 3] = np.float32(0.5) * (np.float32(1.0) + np.tanh(actions[i, 3]))
+        # donate gate (stage 16): same transform; step's donate phase reads
+        # actions[i, 4] as the gift fraction of donate_rate
+        actions[i, 4] = np.float32(0.5) * (np.float32(1.0) + np.tanh(actions[i, 4]))
 
         a = angle[i] + turn * max_turn
         while a >= tau:
