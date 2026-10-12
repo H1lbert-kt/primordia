@@ -30,11 +30,13 @@ from .draw import (
     draw_world,
     make_food_lut,
     make_terrain_lut,
+    make_wood_lut,
     pick_creature,
     pixel_format,
     render_flashes,
     render_transfers,
     stamp_creatures,
+    stamp_structures,
 )
 from .panel import Hud, clear_font_cache, render_panel
 from .settings import Settings
@@ -73,6 +75,7 @@ def run_app(
     shifts = pixel_format(world_surface)
     food_lut = make_food_lut(settings)
     terrain_lut = make_terrain_lut(settings)
+    wood_lut = make_wood_lut(settings)
     buffers = FrameBuffers.create(vw, vh)
     camera = Camera(
         settings,
@@ -194,7 +197,8 @@ def run_app(
 
         pixels = pygame.surfarray.pixels2d(world_surface)
         light = float(light_level(cfg, world.tick))
-        draw_world(pixels, world, camera, food_lut, terrain_lut, light, shifts, buffers, settings.meat_color, settings.signal_color)
+        draw_world(pixels, world, camera, food_lut, terrain_lut, wood_lut, light, shifts, buffers, settings.meat_color, settings.signal_color)
+        stamp_structures(pixels, world, camera, settings, shifts, light)
         stamp_creatures(pixels, world, camera, settings, shifts, light)
         del pixels
         overlay.fill((0, 0, 0, 0))

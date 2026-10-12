@@ -30,9 +30,11 @@ from .draw import (
     draw_world,
     make_food_lut,
     make_terrain_lut,
+    make_wood_lut,
     pixel_format,
     render_flashes,
     stamp_creatures,
+    stamp_structures,
 )
 from .panel import Hud, render_panel
 from .settings import Settings
@@ -119,6 +121,7 @@ class WorldRecorder:
         self._shifts = pixel_format(self._world_surface)
         self._food_lut = make_food_lut(s)
         self._terrain_lut = make_terrain_lut(s)
+        self._wood_lut = make_wood_lut(s)
         self._buffers = FrameBuffers.create(vw, vh)
         self._event_tracker = EventTracker(world)
         self._sparks = SparkTracker(s)
@@ -146,9 +149,10 @@ class WorldRecorder:
         light = float(light_level(world.config, world.tick))
         draw_world(
             pixels, world, self._camera,
-            self._food_lut, self._terrain_lut, light, self._shifts, self._buffers,
-            s.meat_color, s.signal_color,
+            self._food_lut, self._terrain_lut, self._wood_lut, light,
+            self._shifts, self._buffers, s.meat_color, s.signal_color,
         )
+        stamp_structures(pixels, world, self._camera, s, self._shifts, light)
         stamp_creatures(pixels, world, self._camera, s, self._shifts, light)
         del pixels
         # Read-only dynamics: flash diff + sparkline sample (no RNG, so the

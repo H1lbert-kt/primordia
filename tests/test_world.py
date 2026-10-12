@@ -98,6 +98,8 @@ def test_energy_conservation_without_growth_or_deaths() -> None:
         turn_cost=0.0,
         senescence_rate=0.0,  # flat metabolic bill so `removed` is exact
         mutation_rate=0.0,  # diet stays 0: no predation leaks into meat
+        wood_growth_rate=0.0,  # stage 17: no wood -> no gather/build/cook, so
+        # structures cannot spend energy outside this test's food+energy sum
     )
     w = World(cfg, seed=7)
     food0 = float(w.food.sum(dtype=np.float64))

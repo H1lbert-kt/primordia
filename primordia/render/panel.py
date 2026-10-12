@@ -200,7 +200,8 @@ def render_panel(
         y = _text(
             dst,
             18,
-            f"age {int(world.age[slot])}   energy {float(world.energy[slot]):.1f}",
+            f"age {int(world.age[slot])}   energy {float(world.energy[slot]):.1f}"
+            f"   wood {float(world.inventory[slot]):.1f}",
             x,
             y,
             settings.text_dim,
@@ -227,7 +228,7 @@ def render_panel(
             if vals.size > 1:
                 y = _text(dst, 16, label, x, y, settings.text_dim)
                 _vbar_row(dst, x, y, width, 22, vals, settings, signed=False)
-                y += 24
+                y += 22  # stage 17: one more sensor row + 3 more outputs fit
             else:
                 val = float(vals[0])
                 _text(dst, 16, label, x, y - 1, settings.text_dim)
@@ -240,7 +241,7 @@ def render_panel(
                     y - 1,
                     settings.text_dim,
                 )
-                y += 8  # stage 15: 10 single-sensor rows + signal must fit 720px
+                y += 8  # stage 17: 11 single-sensor rows must fit 720 px
         y += 1
 
         # brain: hidden activations and raw outputs
@@ -252,18 +253,24 @@ def render_panel(
         )
         y += 24
         logits = world.actions[slot]
+        # accel/turn stay raw logits (tanh applied here); the gate slots 2..7
+        # are already decoded in brain.apply_actions — sigmoiding them again
+        # would misreport every gate (stage-17 fix of a stage-13/16 bug)
         outs = (
             ("accel", float(np.tanh(logits[0])), True),
             ("turn", float(np.tanh(logits[1])), True),
-            ("gate", float(0.5 * (1.0 + np.tanh(logits[2]))), False),
-            ("emit", float(0.5 * (1.0 + np.tanh(logits[3]))), False),
-            ("don", float(0.5 * (1.0 + np.tanh(logits[4]))), False),
+            ("gate", float(logits[2]), False),
+            ("emit", float(logits[3]), False),
+            ("don", float(logits[4]), False),
+            ("gather", float(logits[5]), False),
+            ("fire", float(logits[6]), False),
+            ("house", float(logits[7]), False),
         )
         for label, val, signed in outs:
             _text(dst, 16, label, x, y - 1, settings.text_dim)
-            _hbar(dst, x + 110, y, width - 160, 9, val, settings, signed)
+            _hbar(dst, x + 110, y, width - 160, 7, val, settings, signed)
             _text(dst, 16, f"{val:+.2f}", x + width - 46, y - 1, settings.text_dim)
-            y += 10
+            y += 9
         y += 2
 
         # weights: W1|b1, W2|b2 and the recurrent W_rec (layout in brain.py)
@@ -280,8 +287,8 @@ def render_panel(
             cfg.hidden_size, cfg.hidden_size
         )
         y = _text(dst, 18, f"W1|b1  ({w1.shape[0]}x{w1.shape[1]})", x, y, settings.text_dim)
-        _, h1 = _heatmap(dst, x, y, 10, 6, w1, settings)
-        y += h1 + 6
+        _, h1 = _heatmap(dst, x, y, 10, 4, w1, settings)  # 4-px cells: stage 17 budget
+        y += h1 + 4
         # W2 and W_rec share one band (fixed panel height budget)
         y = _text(
             dst,
@@ -292,9 +299,9 @@ def render_panel(
             y,
             settings.text_dim,
         )
-        _, h2 = _heatmap(dst, x, y, 10, 6, w2, settings)
-        _, hr = _heatmap(dst, x + 120, y, 10, 6, wrec, settings)
-        y += max(h2, hr) + 6
+        _, h2 = _heatmap(dst, x, y, 10, 4, w2, settings)
+        _, hr = _heatmap(dst, x + 120, y, 10, 4, wrec, settings)
+        y += max(h2, hr) + 4
 
         # body traits
         g = world.genome[slot]
@@ -344,12 +351,18 @@ def render_panel(
     mean_e = float(world.energy[world.alive].mean()) if alive else 0.0
     meat_total = float(world.meat.sum(dtype=np.float64))
     sig_total = float(world.signal.sum(dtype=np.float64))
+    # stage 17 gauges on existing lines (panel width and height budgets)
+    wood_total = float(world.wood.sum(dtype=np.float64))
+    struct_alive = world.struct_alive
+    n_fire = int(np.count_nonzero(struct_alive & (world.struct_type == 0)))
+    n_house = int(np.count_nonzero(struct_alive & (world.struct_type == 1)))
     stats = (
         f"tick {world.tick}   alive {alive}/{world.config.max_creatures}"
         f"   species {hud.species_k if hud.species_k is not None else '-'}",
         f"mean energy {mean_e:.1f}   meat {meat_total:.0f}   sig {sig_total:.0f}",
-        f"births {world.births}   famine {world.deaths_famine}",
-        f"age deaths {world.deaths_age}   predation {world.deaths_predation}",
+        f"births {world.births}   famine {world.deaths_famine}   wood {wood_total:.0f}",
+        f"age deaths {world.deaths_age}   predation {world.deaths_predation}"
+        f"  fire {n_fire}  house {n_house}",
         f"fps {hud.fps:.0f}   sim x{hud.speed}{'  [PAUSED]' if hud.paused else ''}"
         f"{'  [FOLLOW]' if hud.follow else ''}",
         f"seed {hud.seed}   light {float(light_level(world.config, world.tick)):.2f}"

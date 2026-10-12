@@ -1,16 +1,17 @@
 """Save and load the entire world as a versioned ``.npz`` (stage 7).
 
-Format v8 stores exactly what is needed to continue a run bit-for bit
+Format v9 stores exactly what is needed to continue a run bit-for bit
 (v2 added ``food_field`` and ``hidden_prev``; v3 adds ``terrain``, the
 stage-10 geography; v4 adds ``meat`` and ``meat_eaten``, the stage-11
 carrion cycle; v5 widens the genealogy log to 4 columns so both parents
 are recorded, the stage-12 reproductive-barrier metric; v6 adds ``signal``
 and ``signal_emitted``, the stage-13 communication field; v7 is a layout
-bump — the stage-15 tag adds a body trait, so ``genome`` grows from 488
-to 499 columns and the old width would mismatch on load; v8 adds the
-stage-16 ``energy_donated`` counter and the 5-output/9-hidden layout
-shrinks the genome to 451 columns; readers reject older versions with a
-clear message):
+bump — the stage-15 tag adds a body trait; v8 adds the stage-16
+``energy_donated`` counter; v9 adds the stage-17 wood cycle: the ``wood``
+field, ``inventory``, the structure SoA (positions, types, fuel, store,
+owner, alive mask and free-list) plus the ``wood_gathered`` /
+``energy_cooked`` counters, and the genome grows to 490 columns with the
+8-output layout; readers reject older versions with a clear message):
 
     format_version  int32 scalar; readers reject other versions
     config_json     Config as JSON (rebuilds every balance parameter)
@@ -18,13 +19,18 @@ clear message):
                     — both RNG streams, so continuation is identical
     seed            int64, the construction seed (labels only)
     tick, births, deaths_famine, deaths_age, deaths_predation,
-    free_count, next_id, genealogy_used, genealogy_overflow
+    free_count, next_id, genealogy_used, genealogy_overflow,
+    struct_free_count
                     int64 scalars
     meat_eaten      float64 scalar (cumulative carrion energy extracted)
     signal_emitted  float64 scalar (cumulative signal deposited)
     energy_donated  float64 scalar (cumulative energy gifted to neighbours)
+    wood_gathered   float64 scalar (cumulative wood moved into inventories)
+    energy_cooked   float64 scalar (cumulative cooking bonus = fuel burned)
     pos vel angle energy age genome species_id parent_id creature_id
-    alive free_list food food_field terrain meat signal hidden_prev
+    alive free_list inventory food food_field terrain meat signal wood
+    struct_pos struct_type struct_fuel struct_store struct_owner
+    struct_alive struct_free_list hidden_prev
                     the SoA state arrays
     genealogy       (used, 4) int32 birth log, trimmed to genealogy_used
 
@@ -33,11 +39,13 @@ of ``tick`` (see ``cycles.py``), which is saved — so a restored world
 resumes mid-cycle with the exact same phase.
 
 Deliberately **not** stored: ``sensor_buf``/``hidden_buf``/``actions``
-(rewritten by phases 3–5 of every tick — ``hidden_prev`` *is* stored: it is
+(rewritten by phases 8–10 of every tick — ``hidden_prev`` *is* stored: it is
 persistent Elman state), ``cell_*`` grids (rebuilt as phase
 0 of every ``advance``, and again by ``load_world`` so grids are valid even
-before the first tick) and ``ray_unit``/``cell_w``/``cell_h`` (derived from
-Config).
+before the first tick), the stage-17 structure scratch
+(``struct_grid``/``struct_fire``/``fire_heat``/``cover`` — rebuilt by
+``World.rebuild_struct_fields``, also called on load) and
+``ray_unit``/``cell_w``/``cell_h`` (derived from Config).
 
 The Numba RNG stream is process-global: ``save_world`` must be called while
 the world being saved is the active stream — the same "advance worlds
@@ -57,7 +65,7 @@ from .config import Config
 from .genome import get_numba_rng_state, set_numba_rng_state
 from .world import World
 
-FORMAT_VERSION = 8
+FORMAT_VERSION = 9
 
 _INT_SCALARS = (
     "seed",
@@ -70,8 +78,15 @@ _INT_SCALARS = (
     "next_id",
     "genealogy_used",
     "genealogy_overflow",
+    "struct_free_count",
 )
-_FLOAT_SCALARS = ("meat_eaten", "signal_emitted", "energy_donated")
+_FLOAT_SCALARS = (
+    "meat_eaten",
+    "signal_emitted",
+    "energy_donated",
+    "wood_gathered",
+    "energy_cooked",
+)
 _ARRAYS = (
     "pos",
     "vel",
@@ -84,17 +99,26 @@ _ARRAYS = (
     "creature_id",
     "alive",
     "free_list",
+    "inventory",
     "food",
     "food_field",
     "terrain",
     "meat",
     "signal",
+    "wood",
+    "struct_pos",
+    "struct_type",
+    "struct_fuel",
+    "struct_store",
+    "struct_owner",
+    "struct_alive",
+    "struct_free_list",
     "hidden_prev",
 )
 
 
 def save_world(world: World, path: str) -> None:
-    """Write the full simulation state to ``path`` (npz, format v8)."""
+    """Write the full simulation state to ``path`` (npz, format v9)."""
     payload: dict[str, np.ndarray] = {
         "format_version": np.int32(FORMAT_VERSION),
         "config_json": np.array(json.dumps(asdict(world.config), sort_keys=True)),
@@ -150,4 +174,5 @@ def load_world(path: str) -> World:
     world.rng.bit_generator.state = rng["numpy"]
     set_numba_rng_state(tuple(rng["numba"]))
     world.rebuild_counts()
+    world.rebuild_struct_fields()  # stage-17 scratch: heat/cover/grid valid
     return world

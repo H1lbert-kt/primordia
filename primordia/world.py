@@ -7,12 +7,24 @@ never resized. Array dtypes are part of the module contract:
     pos (N,2) float32, vel (N,2) float32, angle (N,) float32,
     energy (N,) float32, age (N,) int32, genome (N,G) float32,
     species_id (N,) int32, parent_id (N,) int32, creature_id (N,) int32,
-    alive (N,) bool, free_list (N,) int32, food (H,W) float32,
+    alive (N,) bool, free_list (N,) int32, inventory (N,) float32
+        (carried wood, stage 17),
+    food (H,W) float32,
     food_field (H,W) float32 (local capacity K, stage 9 patches),
     terrain (H,W) float32 (fertility in [0,1], exact 0.0 = water, stage 10),
     meat (H,W) float32 (carrion energy per cell, stage 11),
+    wood (H,W) float32 (wood per cell, stage 17; wood_field (H,W) is its
+    patch capacity K, same machinery as food_field),
     signal (H,W) float32 (scalar channel, stage 13; diffusion scratch
     signal_buf (H,W) float32 is the stage-14 Jacobi staging buffer),
+    struct_pos (S,2) float32, struct_type (S,) uint8 (0=fire, 1=house),
+    struct_fuel (S,) float32, struct_store (S,) float32 (deposit slot,
+        inert until the territory stage), struct_owner (S,) int32
+        (builder's creature id), struct_alive (S,) bool,
+    struct_free_list (S,) int32   # stage-17 structures, fixed capacity S
+    struct_grid/struct_fire (H,W) int32, fire_heat/cover (H,W) float32
+        (per-tick structure scratch, rebuilt by rebuild_struct_fields,
+        never saved),
     cell_counts (H,W) int32,
     cell_diet (H,W) float32, cell_offsets (H*W+1,) int32,
     cell_tag_re/im (H,W) float32,  # per-cell (cos,sin) of tag_hue, stage 15
@@ -22,7 +34,7 @@ never resized. Array dtypes are part of the module contract:
     ray_unit (n_rays,2) float32,
     sensor_buf (N, input_dim) float32, hidden_buf (N, hidden) float32,
     hidden_prev (N, hidden) float32,   # Elman state: last tick's hidden (saved)
-    actions (N, 4) float32   # scratch buffers, zeroed once, reused every tick
+    actions (N, 8) float32   # scratch buffers, zeroed once, reused every tick
 
 ``creature_id`` is a monotonic birth id (``next_id`` counts up); dead slots
 keep their stale id, so every lookup must also filter ``alive``.
@@ -122,6 +134,99 @@ def _rebuild_grid(
             cursor[k] = p + 1
 
 
+@njit(cache=True)
+def _stamp_structures(
+    struct_pos: np.ndarray,
+    struct_type: np.ndarray,
+    struct_alive: np.ndarray,
+    struct_grid: np.ndarray,
+    struct_fire: np.ndarray,
+    fire_heat: np.ndarray,
+    cover: np.ndarray,
+    cell_w: np.float32,
+    cell_h: np.float32,
+    gw: np.int32,
+    gh: np.int32,
+    width: np.float32,
+    height: np.float32,
+    fire_radius: np.float32,
+    house_radius: np.float32,
+) -> None:
+    """Stamp alive structures into the per-tick grids (serial, stage 17).
+
+    The caller zero-fills the four grids first. Ascending slot order makes
+    overlapping fires deterministic: the *lowest* slot owns a heated cell
+    (``struct_fire``), so the fire that pays for cooking on it is always
+    the same one. A structure occupies its exact cell (``struct_grid``)
+    plus, within its radius, heat/cover stamped at cell-center distance
+    with a toroidal delta (``fire_radius = 0`` keeps only the exact cell).
+    """
+    hw = width * np.float32(0.5)
+    hh = height * np.float32(0.5)
+    for s in range(struct_pos.shape[0]):
+        if not struct_alive[s]:
+            continue
+        x = struct_pos[s, 0]
+        y = struct_pos[s, 1]
+        cx = int(x / cell_w)
+        cy = int(y / cell_h)
+        if cx < 0:
+            cx = 0
+        elif cx >= gw:
+            cx = gw - 1
+        if cy < 0:
+            cy = 0
+        elif cy >= gh:
+            cy = gh - 1
+        struct_grid[cy, cx] = s
+        if struct_type[s] == 0:
+            r = fire_radius
+            r2 = r * r
+            ix0 = int((x - r) / cell_w)
+            ix1 = int((x + r) / cell_w)
+            iy0 = int((y - r) / cell_h)
+            iy1 = int((y + r) / cell_h)
+            for iy in range(iy0, iy1 + 1):
+                dy = (np.float32(iy) + np.float32(0.5)) * cell_h - y
+                if dy > hh:
+                    dy = dy - height
+                elif dy < -hh:
+                    dy = dy + height
+                for ix in range(ix0, ix1 + 1):
+                    dx = (np.float32(ix) + np.float32(0.5)) * cell_w - x
+                    if dx > hw:
+                        dx = dx - width
+                    elif dx < -hw:
+                        dx = dx + width
+                    if dx * dx + dy * dy <= r2:
+                        jy = iy % gh
+                        jx = ix % gw
+                        fire_heat[jy, jx] = 1.0
+                        if struct_fire[jy, jx] < 0:
+                            struct_fire[jy, jx] = s
+        else:
+            r = house_radius
+            r2 = r * r
+            ix0 = int((x - r) / cell_w)
+            ix1 = int((x + r) / cell_w)
+            iy0 = int((y - r) / cell_h)
+            iy1 = int((y + r) / cell_h)
+            for iy in range(iy0, iy1 + 1):
+                dy = (np.float32(iy) + np.float32(0.5)) * cell_h - y
+                if dy > hh:
+                    dy = dy - height
+                elif dy < -hh:
+                    dy = dy + height
+                for ix in range(ix0, ix1 + 1):
+                    dx = (np.float32(ix) + np.float32(0.5)) * cell_w - x
+                    if dx > hw:
+                        dx = dx - width
+                    elif dx < -hw:
+                        dx = dx + width
+                    if dx * dx + dy * dy <= r2:
+                        cover[iy % gh, ix % gw] = 1.0
+
+
 class World:
     """Pre-allocated simulation state: arrays, grids, RNG and tick counter."""
 
@@ -146,6 +251,9 @@ class World:
         # Free-list stack: pop from the end (free_count-1), push at free_count.
         self.free_list = np.arange(n, dtype=np.int32)
         self.free_count = n
+        # Carried wood (stage 17): clamped to Config.max_inventory by the
+        # gather kernel; spent on construction and fire refuelling.
+        self.inventory = np.zeros(n, dtype=np.float32)
 
         # Elman recurrent state: persists across ticks (save/load world state)
         self.hidden_prev = np.zeros((n, config.hidden_size), dtype=np.float32)
@@ -159,6 +267,9 @@ class World:
         self.cell_h = np.float32(config.height / gh)
         self.food = np.full((gh, gw), config.initial_food, dtype=np.float32)
         self.meat = np.zeros((gh, gw), dtype=np.float32)
+        # Wood field (stage 17): second ground resource; starts empty by
+        # default and is refilled by phase_grow_wood toward wood_field.
+        self.wood = np.full((gh, gw), config.initial_wood, dtype=np.float32)
         # Signal field (stage 13): scalar broadcast channel, zero at spawn.
         # Emission deposits here; decay_signal bleeds it; the tick never
         # reads it back into energy (it is information, not food).
@@ -181,6 +292,28 @@ class World:
         self.cell_offsets = np.zeros(n_cells + 1, dtype=np.int32)
         self.cell_slots = np.zeros(n, dtype=np.int32)
         self.cell_cursor = np.zeros(n_cells, dtype=np.int32)
+
+        # Structures (stage 17): fixed-capacity SoA with its own free-list,
+        # same recycling rule as creatures. One structure per world cell.
+        s = config.max_structures
+        self.struct_pos = np.zeros((s, 2), dtype=np.float32)
+        self.struct_type = np.zeros(s, dtype=np.uint8)
+        self.struct_fuel = np.zeros(s, dtype=np.float32)
+        # Deposit slot: written at build time (starts 0), but no rule reads
+        # it until the territory stage — kept in the save so state is whole.
+        self.struct_store = np.zeros(s, dtype=np.float32)
+        self.struct_owner = np.full(s, -1, dtype=np.int32)
+        self.struct_alive = np.zeros(s, dtype=bool)
+        self.struct_free_list = np.arange(s, dtype=np.int32)
+        self.struct_free_count = s
+        # Per-tick structure scratch (rebuilt every advance, never saved):
+        # struct_grid maps exact-cell occupancy (build slots), struct_fire
+        # maps each heated cell to the fire that pays for cooking on it,
+        # fire_heat/cover are the [0,1] cook/shelter fields (stage 17).
+        self.struct_grid = np.full((gh, gw), -1, dtype=np.int32)
+        self.struct_fire = np.full((gh, gw), -1, dtype=np.int32)
+        self.fire_heat = np.zeros((gh, gw), dtype=np.float32)
+        self.cover = np.zeros((gh, gw), dtype=np.float32)
 
         # Ray fan as unit vectors of the fovea-relative offsets; each creature
         # rotates this table by its angle (one sin/cos per creature, not per ray).
@@ -210,6 +343,12 @@ class World:
         # Total energy ever gifted to neighbours (stage 16 gate metric);
         # float64, saved as a scalar in io.py, same pattern.
         self.energy_donated = 0.0
+        # Total wood ever harvested into inventories (stage 17 gate metric);
+        # float64, saved as a scalar in io.py, same pattern.
+        self.wood_gathered = 0.0
+        # Total extra energy ever granted by cooking, i.e. the fuel burned
+        # to pay for it (stage 17 conservation metric): float64, saved.
+        self.energy_cooked = 0.0
         # Cumulative bites by the *attacker's* diet class (stage 12.5):
         # [herbivore (< HERB_MAX), omnivore, predator (> PRED_MIN)] — the
         # measurement buckets of ecology.py, int64 counts of successful
@@ -246,6 +385,10 @@ class World:
         # NumPy stream, drawn after food_field so spawn and patch history
         # stay unchanged; amplitude 0 draws nothing.
         self.terrain = self._make_terrain()
+        # Wood patch capacity (stage 17), drawn last: every earlier field
+        # keeps its historic stream position for a seed; amplitude 0 draws
+        # nothing (uniform K), same rule as food patches and terrain.
+        self.wood_field = self._make_wood_field()
 
     def _value_noise(self, scale: float) -> np.ndarray:
         """Bilinear value noise in [0, 1] on a lattice spaced ``scale`` world
@@ -318,6 +461,21 @@ class World:
         np.clip(terrain, 0.0, 1.0, out=terrain)
         return terrain.astype(np.float32)
 
+    def _make_wood_field(self) -> np.ndarray:
+        """Wood patch capacity K in [1-amp, 1] * wood_capacity (stage 17).
+
+        Same value-noise machinery as ``_make_food_field`` (drawn after
+        terrain so earlier stream positions never move); ``amplitude = 0``
+        returns the uniform field without drawing RNG.
+        """
+        cfg = self.config
+        gh, gw = self.food.shape
+        amp = cfg.wood_patch_amplitude
+        if amp <= 0.0:
+            return np.full((gh, gw), cfg.wood_capacity, dtype=np.float32)
+        noise = self._value_noise(cfg.wood_patch_scale)
+        return (cfg.wood_capacity * (1.0 - amp + amp * noise)).astype(np.float32)
+
     @property
     def alive_count(self) -> int:
         return int(np.count_nonzero(self.alive))
@@ -351,6 +509,36 @@ class World:
             np.float32(1.0 / self.cell_h),
             np.int32(gw),
             np.int32(gh),
+        )
+
+    def rebuild_struct_fields(self) -> None:
+        """Zero and re-stamp the stage-17 structure grids (phase 15 + load).
+
+        ``struct_grid`` (exact-cell occupancy), ``struct_fire`` (which fire
+        heats/pays for each cell), ``fire_heat`` and ``cover`` are scratch:
+        rebuilt from the structure arrays, never saved. Numpy fills the
+        grids (C-speed), the kernel only stamps.
+        """
+        self.struct_grid.fill(-1)
+        self.struct_fire.fill(-1)
+        self.fire_heat.fill(0.0)
+        self.cover.fill(0.0)
+        _stamp_structures(
+            self.struct_pos,
+            self.struct_type,
+            self.struct_alive,
+            self.struct_grid,
+            self.struct_fire,
+            self.fire_heat,
+            self.cover,
+            self.cell_w,
+            self.cell_h,
+            np.int32(self.food.shape[1]),
+            np.int32(self.food.shape[0]),
+            np.float32(self.config.width),
+            np.float32(self.config.height),
+            np.float32(self.config.fire_radius),
+            np.float32(self.config.house_radius),
         )
 
     def spawn(self, count: int) -> np.ndarray:

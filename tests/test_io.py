@@ -23,10 +23,16 @@ STATE_ARRAYS = (
     "pos", "vel", "angle", "energy", "age", "genome", "species_id",
     "parent_id", "creature_id", "alive", "free_list", "food", "food_field",
     "terrain", "meat", "hidden_prev",
+    # stage 17: carried wood and the structure SoA are saved; the derived
+    # scratch (struct_grid/struct_fire/fire_heat/cover) is rebuilt on load
+    "inventory", "wood", "wood_field", "struct_pos", "struct_type",
+    "struct_fuel", "struct_store", "struct_owner", "struct_alive",
+    "struct_free_list",
 )
 COUNTERS = (
     "tick", "births", "deaths_famine", "deaths_age", "deaths_predation",
     "free_count", "next_id", "genealogy_used", "genealogy_overflow", "seed",
+    "struct_free_count", "wood_gathered", "energy_cooked",
 )
 
 
@@ -175,6 +181,15 @@ def test_v7_save_is_rejected_clearly(tmp_path: Path) -> None:
     before the 451-column shape mismatch (stage 16 layout bump)."""
     path = tmp_path / "old.npz"
     np.savez(path, format_version=np.int32(7))
+    with pytest.raises(ValueError, match="format"):
+        load_world(str(path))
+
+
+def test_v8_save_is_rejected_clearly(tmp_path: Path) -> None:
+    """Pre-stage-17 saves have a 451-column genome and no inventory/wood/
+    structure arrays; the gate must reject before the shape mismatch."""
+    path = tmp_path / "old.npz"
+    np.savez(path, format_version=np.int32(8))
     with pytest.raises(ValueError, match="format"):
         load_world(str(path))
 

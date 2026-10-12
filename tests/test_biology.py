@@ -54,7 +54,7 @@ def test_senescence_shrinks_effective_speed() -> None:
     slot = first_alive(w)
     w.genome[slot, cfg.brain_params] = cfg.max_speed  # trait
     w.age[slot] = 100  # wear = e^1 ~ 2.72
-    w.actions[slot] = (9.0, 0.0, 0.0, 0.0, 0.0)  # accel logit -> tanh ~= 1
+    w.actions[slot] = (9.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)  # accel logit
     apply_actions(
         w.actions,
         w.angle,

@@ -8,42 +8,58 @@ profiler in ``bench``):
     0. rebuild creature grid  (serial; counts, diet sums and CSR cell lists
        that sensors, bite and mate search read)
     1. grow food        (parallel over cells; models photosynthesis)
-    2. decay meat       (parallel over cells; carrion loses meat_decay per
+    2. grow wood        (parallel over cells; stage 17 — same refill law as
+       food toward wood_field * terrain, constant rate, no seasonality)
+    3. decay meat       (parallel over cells; carrion loses meat_decay per
        tick, stage 11 — nutrients are borrowed, not stored)
-    3. decay signal     (parallel over cells; signal loses signal_decay per
+    4. decay signal     (parallel over cells; signal loses signal_decay per
        tick, stage 13 — a broadcast is information, it fades)
-    4. diffuse signal   (parallel over cells; Jacobi 5-point pass over the
+    5. diffuse signal   (parallel over cells; Jacobi 5-point pass over the
        4 toroidal neighbors, stage 14 — pheromone spreads before this
        tick's sources emit, so a deposit is picked up from the *next*
        tick onward)
-    5. age + metabolize (parallel over slots, alive only; energy drains by
+    6. decay structures (serial; every fire burns fire_fuel_decay fuel and
+       dies at 0, stage 17 — a house persists until rules of its own exist)
+    7. age + metabolize (parallel over slots, alive only; energy drains by
        metabolic_cost * wear plus move_cost * |vel|^2, wear =
        exp(senescence_rate * age), stage 11)
-    6. perceive         (parallel: rays + smells + internal -> sensor_buf;
+    8. perceive         (parallel: rays + smells + internal -> sensor_buf;
        ray reach also divided by wear)
-    7. think            (parallel: MLP forward -> hidden_buf, raw actions)
-    8. apply actions    (parallel: accel/turn -> vel/angle, eat gate, emit
-        gate; turning drains turn_cost * |radians| — steering is never
-        free; top speed divided by wear)
-    9. emit signal      (serial: own-cell deposit of emit_rate * gate,
+    9. think            (parallel: MLP forward -> hidden_buf, raw actions)
+    10. apply actions   (parallel: accel/turn -> vel/angle, eat/emit/donate/
+        gather/build_fire/build_house gates; turning drains turn_cost *
+        |radians| — steering is never free; top speed divided by wear)
+    11. emit signal     (serial: own-cell deposit of emit_rate * gate,
         drained from energy at signal_emit_cost * gate, stage 13 — the
         deposit is only visible to perceive from the *next* tick, since
         perceive already ran; the contract is deliberate, never reordered)
-    10. donate          (serial: gift donate_rate * gate to the nearest
+    12. donate          (serial: gift donate_rate * gate to the nearest
         living neighbour within donate_range, stage 16 — energy moves in
         the same tick, no latency; who may receive is physics, whether to
         give is the gate)
-    11. eat             (serial: shared cells; food first, then carrion;
-        extraction * gate)
-    12. bite            (serial: contact predation; gate * diet budget, energy
-       transfer at bite_efficiency, the dissipating share lands as carrion,
-       prey at 0 energy is killed here and counted as predation)
-    13. integrate motion + wrap borders (parallel, alive only)
-    14. deaths          (serial: kill, deposit leftover body energy as carrion,
-       zero energy, push slot to free-list)
-    15. reproduce       (serial: energy >= threshold -> nearest partner within
-       mate_range -> child; uses the slots freed in phases 11 and 14;
-       newborns skip perceive/think until the next tick)
+    13. gather          (serial: wood moves cell -> inventory, budgeted by
+        gather_rate * gate and clamped both ends, stage 17 — hauling is
+        free to store, not to carry: movement still costs move_cost)
+    14. build           (serial: gates > 0.5 spend carried wood + energy
+        into a structure on the creature's cell; build_fire on an existing
+        fire refuels it with carried wood at no energy cost, stage 17 —
+        whether building pays is never our call, only selection's)
+    15. rebuild structure fields (zero + stamp: exact-cell occupancy,
+        fire heat radius, house cover radius — a fire built this tick
+        already cooks this tick: an object is not a signal, stage 17)
+    16. eat             (serial: shared cells; food first, then carrion;
+        extraction * gate; food eaten under fire earns cook_bonus x energy
+        paid 1:1 from that fire's fuel, stage 17 — never created energy)
+    17. bite            (serial: contact predation; gate * diet budget,
+        energy transfer at bite_efficiency reduced by house cover, the
+        dissipating share lands as carrion, prey at 0 energy is killed
+        here and counted as predation)
+    18. integrate motion + wrap borders (parallel, alive only)
+    19. deaths          (serial: kill, deposit leftover body energy as carrion,
+        zero energy, push slot to free-list)
+    20. reproduce       (serial: energy >= threshold -> nearest partner within
+        mate_range -> child; uses the slots freed in phases 16 and 19;
+        newborns skip perceive/think until the next tick)
 
 Perception uses positions from the start of the tick, movement is applied
 afterwards (bite uses those same positions). The CSR cell lists are one
@@ -189,6 +205,39 @@ def _diffuse_signal(
 
 
 @njit(cache=True)
+def _decay_structures(
+    struct_type: np.ndarray,
+    struct_fuel: np.ndarray,
+    struct_alive: np.ndarray,
+    struct_free_list: np.ndarray,
+    struct_free_count: np.int32,
+    fuel_decay: np.float32,
+) -> tuple[int, int]:
+    """Serial: every fire burns ``fire_fuel_decay`` fuel per tick (stage 17).
+
+    A fire at ``fuel <= 0`` dies and its slot returns to the structure
+    free-list; a house never decays (no rule owns its end yet — silence is
+    not permission to invent one). Returns ``(free_count, n_died)``. Cells
+    still point at the dead slot until phase 15's rebuild, so readers must
+    check ``struct_alive`` (the build kernel does).
+    """
+    n_died = 0
+    for s in range(struct_alive.size):
+        if not struct_alive[s] or struct_type[s] != 0:
+            continue
+        fuel = struct_fuel[s] - fuel_decay
+        if fuel <= 0.0:
+            struct_alive[s] = False
+            struct_fuel[s] = 0.0
+            struct_free_list[struct_free_count] = s
+            struct_free_count = struct_free_count + 1
+            n_died = n_died + 1
+        else:
+            struct_fuel[s] = fuel
+    return struct_free_count, n_died
+
+
+@njit(cache=True)
 def _eat(
     pos: np.ndarray,
     energy: np.ndarray,
@@ -196,20 +245,29 @@ def _eat(
     food: np.ndarray,
     meat: np.ndarray,
     actions: np.ndarray,
+    struct_fire: np.ndarray,
+    struct_fuel: np.ndarray,
     cell_w: np.float32,
     cell_h: np.float32,
     gw: np.int32,
     gh: np.int32,
     eat_rate: np.float32,
-) -> float:
+    cook_bonus: np.float32,
+) -> tuple[float, float]:
     """Serial: shared food cells would make a parallel scatter a race.
 
     Food is drained first up to the gate-scaled budget; whatever the budget
     still allows drains carrion (stage 11 — a scavenger eats what is there).
-    Returns the total meat energy extracted (the caller adds it to
-    ``World.meat_eaten``).
+    Cooking (stage 17): food eaten on a cell heated by a fire yields
+    ``take * (cook_bonus - 1)`` extra energy, drained **from that fire's
+    fuel** at 1:1 — fuel short of the claim pays the proportional bonus and
+    then stops, so the eater's gain and the fuel's loss are always equal
+    and no energy is created. Carrion is never cooked (v1). Returns
+    ``(meat_eaten, energy_cooked)``; the caller adds them to
+    ``World.meat_eaten`` and ``World.energy_cooked``.
     """
     meat_eaten = np.float32(0.0)
+    cooked = np.float32(0.0)
     for i in range(alive.size):
         if not alive[i]:
             continue
@@ -231,7 +289,19 @@ def _eat(
             take = budget
         if take > 0.0:
             food[cy, cx] = food[cy, cx] - take
-            energy[i] = energy[i] + take
+            extra = np.float32(0.0)
+            fire_slot = struct_fire[cy, cx]
+            if fire_slot >= 0 and cook_bonus > 1.0:
+                want = take * (cook_bonus - np.float32(1.0))
+                have = struct_fuel[fire_slot]
+                if want >= have:
+                    extra = have
+                    struct_fuel[fire_slot] = 0.0
+                else:
+                    extra = want
+                    struct_fuel[fire_slot] = have - want
+            energy[i] = energy[i] + take + extra
+            cooked = cooked + extra
             budget = budget - take
         take_m = meat[cy, cx]
         if take_m > budget:
@@ -240,7 +310,7 @@ def _eat(
             meat[cy, cx] = meat[cy, cx] - take_m
             energy[i] = energy[i] + take_m
             meat_eaten = meat_eaten + take_m
-    return meat_eaten
+    return meat_eaten, cooked
 
 
 @njit(cache=True)
@@ -410,6 +480,170 @@ def _donate(
     return total, align_sum, pairs
 
 
+@njit(cache=True)
+def _gather(
+    pos: np.ndarray,
+    inventory: np.ndarray,
+    alive: np.ndarray,
+    actions: np.ndarray,
+    wood: np.ndarray,
+    cell_w: np.float32,
+    cell_h: np.float32,
+    gw: np.int32,
+    gh: np.int32,
+    gather_rate: np.float32,
+    max_inventory: np.float32,
+) -> float:
+    """Serial: move wood from the cell into the carrier (stage 17).
+
+    Budget ``gather_rate * gather_gate`` clamped at both ends: the cell
+    donates at most what it holds, the inventory accepts at most the room
+    left under ``max_inventory`` — an empty cell or a full pack is a cheap
+    no-op. Shared cells stay deterministic through slot order. Returns the
+    total moved (the caller adds it to ``World.wood_gathered``).
+    """
+    moved = np.float32(0.0)
+    for i in range(alive.size):
+        if not alive[i]:
+            continue
+        budget = gather_rate * actions[i, 5]
+        room = max_inventory - inventory[i]
+        if budget <= 0.0 or room <= 0.0:
+            continue
+        cx = int(pos[i, 0] / cell_w)
+        cy = int(pos[i, 1] / cell_h)
+        if cx < 0:
+            cx = 0
+        elif cx >= gw:
+            cx = gw - 1
+        if cy < 0:
+            cy = 0
+        elif cy >= gh:
+            cy = gh - 1
+        take = wood[cy, cx]
+        if take > budget:
+            take = budget
+        if take > room:
+            take = room
+        if take > 0.0:
+            wood[cy, cx] = wood[cy, cx] - take
+            inventory[i] = inventory[i] + take
+            moved = moved + take
+    return moved
+
+
+@njit(cache=True)
+def _build(
+    pos: np.ndarray,
+    energy: np.ndarray,
+    inventory: np.ndarray,
+    alive: np.ndarray,
+    actions: np.ndarray,
+    creature_id: np.ndarray,
+    struct_pos: np.ndarray,
+    struct_type: np.ndarray,
+    struct_fuel: np.ndarray,
+    struct_store: np.ndarray,
+    struct_owner: np.ndarray,
+    struct_alive: np.ndarray,
+    struct_free_list: np.ndarray,
+    struct_free_count: np.int32,
+    struct_grid: np.ndarray,
+    cell_w: np.float32,
+    cell_h: np.float32,
+    gw: np.int32,
+    gh: np.int32,
+    fire_wood_cost: np.float32,
+    fire_energy_cost: np.float32,
+    house_wood_cost: np.float32,
+    house_energy_cost: np.float32,
+    fire_initial_fuel: np.float32,
+) -> int:
+    """Serial: attempt construction and refuelling (stage 17).
+
+    A gate decoded above 0.5 (raw logit positive) is a *decision*; physics
+    then demands full payment — carried ``*_wood_cost`` wood plus
+    ``*_energy_cost`` energy, all-or-nothing, no debt (energy can reach
+    exactly 0 and the deaths phase may finish the story). Rules per cell:
+
+    - ``build_fire`` on an existing live fire refuels it: carried wood
+      converts 1:1 into fuel up to ``fire_initial_fuel``, free of energy
+      cost (stocking the pile is effort enough).
+    - ``build_fire`` on an empty cell (or a dead occupant's cell — the
+      grid is one rebuild stale) raises a fire at full price.
+    - ``build_house`` only on an empty cell; houses and fires never share
+      a cell, and nothing demolishes anything (no rule owns that yet).
+
+    The fire gate is evaluated first and writes ``struct_grid`` on
+    creation, so same-tick duplicates see the fresh structure. Slot order
+    is ascending and no random numbers are drawn. Returns the new
+    ``struct_free_count``.
+    """
+    for i in range(alive.size):
+        if not alive[i]:
+            continue
+        gate_fire = actions[i, 6]
+        gate_house = actions[i, 7]
+        if gate_fire <= 0.5 and gate_house <= 0.5:
+            continue
+        cx = int(pos[i, 0] / cell_w)
+        cy = int(pos[i, 1] / cell_h)
+        if cx < 0:
+            cx = 0
+        elif cx >= gw:
+            cx = gw - 1
+        if cy < 0:
+            cy = 0
+        elif cy >= gh:
+            cy = gh - 1
+        if gate_fire > 0.5:
+            slot = struct_grid[cy, cx]
+            if slot >= 0 and struct_alive[slot] and struct_type[slot] == 0:
+                want = fire_initial_fuel - struct_fuel[slot]
+                if want > 0.0 and inventory[i] > 0.0:
+                    take = inventory[i] if inventory[i] < want else want
+                    inventory[i] = inventory[i] - take
+                    struct_fuel[slot] = struct_fuel[slot] + take
+            elif (slot < 0 or not struct_alive[slot]) and struct_free_count > 0:
+                if (
+                    inventory[i] >= fire_wood_cost
+                    and energy[i] >= fire_energy_cost
+                ):
+                    s = struct_free_list[struct_free_count - 1]
+                    struct_free_count = struct_free_count - 1
+                    struct_pos[s, 0] = pos[i, 0]
+                    struct_pos[s, 1] = pos[i, 1]
+                    struct_type[s] = 0
+                    struct_fuel[s] = fire_initial_fuel
+                    struct_store[s] = 0.0
+                    struct_owner[s] = creature_id[i]
+                    struct_alive[s] = True
+                    struct_grid[cy, cx] = s  # same tick sees the new fire
+                    inventory[i] = inventory[i] - fire_wood_cost
+                    energy[i] = energy[i] - fire_energy_cost
+        if gate_house > 0.5:
+            # re-read: the fire branch may have just built on this cell
+            slot = struct_grid[cy, cx]
+            if (slot < 0 or not struct_alive[slot]) and struct_free_count > 0:
+                if (
+                    inventory[i] >= house_wood_cost
+                    and energy[i] >= house_energy_cost
+                ):
+                    s = struct_free_list[struct_free_count - 1]
+                    struct_free_count = struct_free_count - 1
+                    struct_pos[s, 0] = pos[i, 0]
+                    struct_pos[s, 1] = pos[i, 1]
+                    struct_type[s] = 1
+                    struct_fuel[s] = 0.0
+                    struct_store[s] = 0.0
+                    struct_owner[s] = creature_id[i]
+                    struct_alive[s] = True
+                    struct_grid[cy, cx] = s
+                    inventory[i] = inventory[i] - house_wood_cost
+                    energy[i] = energy[i] - house_energy_cost
+    return struct_free_count
+
+
 @njit(cache=True, parallel=True)
 def _integrate(
     pos: np.ndarray,
@@ -501,6 +735,21 @@ def phase_grow_food(world: World) -> None:
     _grow_food(world.food, world.food_field, world.terrain, np.float32(rate))
 
 
+def phase_grow_wood(world: World) -> None:
+    """Stage 17 wood: the same refill law as food, without the seasons.
+
+    ``wood`` moves toward ``wood_field * terrain`` at a constant
+    ``wood_growth_rate`` (clamped to [0, 1]) — light and season modulate
+    food only, so a wood line in a stats plot is comparable across ticks.
+    Water cells target 0 exactly, same as food. Rate 0 skips the kernel.
+    """
+    cfg = world.config
+    if cfg.wood_growth_rate <= 0.0:
+        return
+    rate = min(cfg.wood_growth_rate, 1.0)
+    _grow_food(world.wood, world.wood_field, world.terrain, np.float32(rate))
+
+
 def phase_decay_meat(world: World) -> None:
     cfg = world.config
     if cfg.meat_decay > 0.0:
@@ -525,6 +774,21 @@ def phase_diffuse_signal(world: World) -> None:
     if cfg.signal_diffuse > 0.0:
         _diffuse_signal(world.signal, world.signal_buf, np.float32(cfg.signal_diffuse))
         np.copyto(world.signal, world.signal_buf)
+
+
+def phase_decay_structures(world: World) -> None:
+    cfg = world.config
+    if cfg.fire_fuel_decay <= 0.0:
+        return
+    struct_free_count, _n_died = _decay_structures(
+        world.struct_type,
+        world.struct_fuel,
+        world.struct_alive,
+        world.struct_free_list,
+        np.int32(world.struct_free_count),
+        np.float32(cfg.fire_fuel_decay),
+    )
+    world.struct_free_count = int(struct_free_count)
 
 
 def phase_age_and_metabolize(world: World) -> None:
@@ -568,6 +832,7 @@ def phase_perceive(world: World) -> None:
         world.food,
         world.meat,
         world.signal,
+        world.wood,
         world.cell_counts,
         world.cell_diet,
         world.cell_tag_re,
@@ -590,6 +855,7 @@ def phase_perceive(world: World) -> None:
         np.float32(energy_scale),
         light,
         np.float32(cfg.signal_capacity),
+        np.float32(cfg.wood_capacity),
         np.float32(cfg.senescence_rate),
     )
 
@@ -687,23 +953,88 @@ def phase_donate(world: World) -> None:
     world.donate_pairs = int(pairs)
 
 
+def phase_gather(world: World) -> None:
+    cfg = world.config
+    if cfg.gather_rate <= 0.0:
+        return
+    gh, gw = world.wood.shape
+    moved = _gather(
+        world.pos,
+        world.inventory,
+        world.alive,
+        world.actions,
+        world.wood,
+        world.cell_w,
+        world.cell_h,
+        np.int32(gw),
+        np.int32(gh),
+        np.float32(cfg.gather_rate),
+        np.float32(cfg.max_inventory),
+    )
+    world.wood_gathered += float(moved)
+
+
+def phase_build(world: World) -> None:
+    cfg = world.config
+    gh, gw = world.struct_grid.shape
+    world.struct_free_count = int(
+        _build(
+            world.pos,
+            world.energy,
+            world.inventory,
+            world.alive,
+            world.actions,
+            world.creature_id,
+            world.struct_pos,
+            world.struct_type,
+            world.struct_fuel,
+            world.struct_store,
+            world.struct_owner,
+            world.struct_alive,
+            world.struct_free_list,
+            np.int32(world.struct_free_count),
+            world.struct_grid,
+            world.cell_w,
+            world.cell_h,
+            np.int32(gw),
+            np.int32(gh),
+            np.float32(cfg.fire_wood_cost),
+            np.float32(cfg.fire_energy_cost),
+            np.float32(cfg.house_wood_cost),
+            np.float32(cfg.house_energy_cost),
+            np.float32(cfg.fire_initial_fuel),
+        )
+    )
+
+
+def phase_rebuild_struct_fields(world: World) -> None:
+    """Restamp occupancy, fire heat and house cover after this tick's
+    build/decay — so a fire raised this tick already cooks this tick
+    (stage 17: an object is not a signal; compare emit_signal's latency)."""
+    world.rebuild_struct_fields()
+
+
 def phase_eat(world: World) -> None:
     cfg = world.config
     gh, gw = world.food.shape
-    meat_eaten = _eat(
+    meat_eaten, energy_cooked = _eat(
         world.pos,
         world.energy,
         world.alive,
         world.food,
         world.meat,
         world.actions,
+        world.struct_fire,
+        world.struct_fuel,
         world.cell_w,
         world.cell_h,
         np.int32(gw),
         np.int32(gh),
         np.float32(cfg.eat_rate),
+        np.float32(cfg.cook_bonus),
     )
     world.meat_eaten += float(meat_eaten)
+    world.energy_cooked += float(energy_cooked)
 
 
 @njit(cache=True)
@@ -734,18 +1065,27 @@ def _bite(
     bite_by_diet: np.ndarray,
     herb_max: np.float32,
     pred_min: np.float32,
+    cover: np.ndarray,
+    cover_reduction: np.float32,
 ) -> tuple[int, int]:
     """Serial contact predation: gate * diet budget drains neighbours.
 
     For every living attacker whose ``bite_rate * gate * diet`` budget is
     positive, scan the CSR cells within ``reach`` of the attacker cell and
     drain each victim inside contact range ``contact_range * (size_a + size_v)``
-    (shortest toroidal delta). The victim loses ``take`` and the attacker
-    keeps ``bite_efficiency * take``; a carrion share
-    ``carrion_yield * (1 - bite_efficiency) * take`` lands on the victim's
+    (shortest toroidal delta). The victim loses ``land`` and the attacker
+    keeps ``bite_efficiency * land``; a carrion share
+    ``carrion_yield * (1 - bite_efficiency) * land`` lands on the victim's
     cell (stage 11 — the rest of the "heat" still dissipates), so energy is
-    never created. A victim left at zero energy dies here: its slot is
-    pushed onto the free-list and counted as a predation death.
+    never created.
+
+    House cover (stage 17): a victim standing under cover only suffers the
+    uncovered share ``land = take * (1 - cover_reduction * cover)`` — the
+    shield absorbs the rest — while the attacker's budget still spends the
+    full attempt ``take``, so shelter wastes a blow instead of delaying it
+    for free. With no cover the factors are exactly 1.0 and the transfer is
+    bit-identical to stage 16. A victim left at zero energy dies here: its
+    slot is pushed onto the free-list and counted as a predation death.
 
     Each successful take is also attributed to the attacker's diet class
     (stage 12.5 measurement: ``bite_by_diet[herb/omn/pred] += 1``, buckets
@@ -798,6 +1138,7 @@ def _bite(
                 while ix >= gw:
                     ix = ix - gw
                 k = iy * gw + ix
+                shield = np.float32(1.0) - cover_reduction * cover[iy, ix]
                 for p in range(offsets[k], offsets[k + 1]):
                     j = slots[p]
                     if j == i or not alive[j] or energy[j] <= 0.0:
@@ -818,12 +1159,13 @@ def _bite(
                     take = energy[j] if energy[j] < budget else budget
                     if take <= 0.0:
                         continue
+                    land = take * shield  # full attempt is spent below
                     bite_by_diet[bucket] = bite_by_diet[bucket] + 1
-                    energy[j] = energy[j] - take
-                    energy[i] = energy[i] + bite_efficiency * take
+                    energy[j] = energy[j] - land
+                    energy[i] = energy[i] + bite_efficiency * land
                     # the dissipating share lands as carrion on the victim cell
                     meat[iy, ix] = (
-                        meat[iy, ix] + carrion_yield * (np.float32(1.0) - bite_efficiency) * take
+                        meat[iy, ix] + carrion_yield * (np.float32(1.0) - bite_efficiency) * land
                     )
                     budget = budget - take
                     if energy[j] <= 0.0:
@@ -880,6 +1222,8 @@ def phase_bite(world: World) -> None:
         world.bite_by_diet,
         np.float32(HERB_MAX),
         np.float32(PRED_MIN),
+        world.cover,
+        np.float32(cfg.cover_reduction),
     )
     world.free_count = int(free_count)
     world.deaths_predation += int(n_pred)
@@ -966,15 +1310,20 @@ def phase_reproduce(world: World) -> None:
 PHASES = (
     ("rebuild_counts", phase_rebuild_counts),
     ("grow_food", phase_grow_food),
+    ("grow_wood", phase_grow_wood),
     ("decay_meat", phase_decay_meat),
     ("decay_signal", phase_decay_signal),
     ("diffuse_signal", phase_diffuse_signal),
+    ("decay_structures", phase_decay_structures),
     ("age_metabolize", phase_age_and_metabolize),
     ("perceive", phase_perceive),
     ("think", phase_think),
     ("apply_actions", phase_apply_actions),
     ("emit_signal", phase_emit_signal),
     ("donate", phase_donate),
+    ("gather", phase_gather),
+    ("build", phase_build),
+    ("rebuild_struct_fields", phase_rebuild_struct_fields),
     ("eat", phase_eat),
     ("bite", phase_bite),
     ("integrate", phase_integrate),

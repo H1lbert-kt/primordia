@@ -14,6 +14,70 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   README principal em **inglês**.
 
 ## Estado atual do repositório (verificado em 2026-10-12)
+- **Etapa 17 ("civilização": madeira, fogo, casas) concluída, commit
+  pendente de `/cp`:** plano em `.opencode/plans/etapa-17-civilizacao.md`
+  (decisões do usuário: 2 gates separados `build_fire`/`build_house`,
+  +1 input `smell wood`, piloto + gate 3 seeds × 10k avisando;
+  **`house_energy_cost=12`** para o gate; publicar **controle `off` +
+  tratamento `h12` lado a lado**). **Núcleo:** novo recurso `wood (N,)`
+  com `inventory (N,)` (pack size = `max_inventory=4`), campo
+  `wood_field (H,W)` (value-noise patches + crescimento, RNG pós-spawn
+  desloca trajetórias vs etapa 16), estruturas com free-list
+  (`struct_fire/struct_house` no grid, `struct_free_count`,
+  `max_structures=1024`); sensores: `smell wood` em `3·n_rays+13`
+  (soma/picos/antenas da janela de cheiro, self-excluded);
+  **`N_OUTPUTS` 4→8** (gather, build_fire, build_house; scaled-sigmoid);
+  **layout 35 in / 8 out / 9 hidden / 485 brain_params / 490 genoma**;
+  fases 15→**21** (`grow_wood`, `decay_structures`, `gather`, `build`,
+  `rebuild_struct_fields` + `eat`/`bite`/`deaths` estendidos).
+  **`FORMAT_VERSION` 8→9** (`inventory, wood, wood_field, struct_*,
+  struct_free_count, wood_gathered, energy_cooked`; v1–v8 → ValueError
+  "format"). **Config (defaults):** `wood_capacity=2.0,
+  wood_growth_rate=0.01, initial_wood=0.0, wood_patch_amplitude=1.0,
+  wood_patch_scale=60.0, gather_rate=0.5, max_inventory=4.0,
+  fire_wood_cost=3.0, fire_energy_cost=10.0, house_wood_cost=4.0,
+  house_energy_cost=20.0, fire_initial_fuel=3.0, fire_fuel_decay=0.002,
+  fire_radius=6.0, house_radius=5.0, cook_bonus=1.5,
+  cover_reduction=0.5, max_structures=1024` + **validação cruzada**
+  `fire/house wood cost <= max_inventory` (plano trazia 6.0 > 4.0 =
+  casa inafordável por construção; corrigido p/ 4.0 com guard).
+  Semânticas: pagamento de build all-or-nothing; fogo construído cozinha
+  no mesmo tick; cook nunca cria energia (extra drenado 1:1 do fuel);
+  cover = escudo `land = take·(1−cover_reduction·cover)` com orçamento
+  gasto inteiro; refuel `min(inventory, fire_initial_fuel−fuel)` sem
+  custo de energia; uma estrutura por célula (fogo primeiro);
+  `struct_fire` = menor slot; casas nunca decaem; mundos em sequência.
+  **Stats:** `n_fire`, `n_house`, `wood_total`, `wood_gathered`,
+  `energy_cooked` (+ fix do sigmoid duplo que somava 2×). **Render:**
+  overlay de madeira, sprite de casa, painel 8 saídas `W2|b2 (8x10)`,
+  linha `smell wood` + linhas `wood/fire/house`, HUD overview.
+  **Testes: 206 passed** — `tests/test_civilization.py` (22: layout,
+  validação, grow/gather/build/refuel/burnout, heat/cover, precedência de
+  slot, cook ×3, cover bite, smell wood, stats, determinismo sequencial,
+  save/load estruturas), `test_io` v8, pins atualizados (35/485/490/8,
+  21 fases, 8-tupla biology, conservação com `wood_growth_rate=0.0`,
+  painel `test_panel_shows_all_gates_and_w2_layout`).
+  **Bench** (load 6.9–7.4): **127–134 / 92–136 / 42–124** a
+  500/2000/5000 — piso 30 @N=2000 ✓; fases novas ≈138 µs ≈ **1.2%**
+  (grow_wood 11 / decay_structures 4 / gather 33 / build 44 /
+  rebuild_struct_fields 47). Screenshots `/tmp/opencode/
+  stage17_overview.png` e `stage17_selected.png`.
+  **Experimento `experiments/civilization/`** (proto_culture.toml,
+  seeds 42/7/13, pre-registrado no docstring do `run.py`):
+  **piloto** 2 seeds × 5k × {off, h20, h12, h8}: final 66/2/24/14
+  (off seed42 recupera 74→110); H1 parcial **não-monótona** (h8 = spam
+  591 casas, pior que h12); H2 ✓ (fire/cook ativos em todas).
+  **gate** 3 seeds × 10k: **controle `off` (house=1e6) HARD GATE PASS**
+  (434/110/243, frac 0.083, 804 births) vs **`h12` HARD GATE FAIL**
+  (seed13 **extinta @8317**; 31/40/0; 169 births; frac 0.129) — casas
+  derrubam a pop ~10×; `n_house` **estagna após ~5k** (501→501) =
+  seleção fecha o spam, tarde demais; medido ✓ em h12 (fires 3/3,
+  houses 3/3, cook/gather). Controle rodo **pós-h12** (divulgado no
+  README). `experiments/civilization/README.md` com números, figs
+  pilot/gate (economy/building/wood) e 5 limitações. README principal:
+  490/35/206 testes/bench 17/roadmap 1–17 + `civilization` na lista.
+  GIF demo não regenerado (não pedido). **Próximo passo do usuário:
+  `/cp`**, depois daemon/território/Oja.
 - **Etapa 16 ("doação") concluída, commit pendente de `/cp`:** plano em
   `.opencode/plans/etapa-16-doacao.md` (decisões do usuário: receptor =
   **vizinho mais próximo** em `donate_range` (recepção automática, sem
@@ -823,7 +887,8 @@ antes de dizer que uma mudança de tick não regrediu desempenho.
 Roadmap "mundo real" aprovado (`.opencode/plans/roadmap-mundo-real.md`):
 10 ambiente (terreno/estações/luz) ✓ → 11 biologia (sexualidade/senescência/carniça) ✓
 → 12 ecologia (ciclos tróficos) ✓ → 13 canal ✓ → 14 difusão ✓ →
-15 tag/cor ✓ → 16 doação + `experiments/proto_culture/` ✓ (próxima:
-civilização/daemon/território/Oja, a decidir com o usuário).
+15 tag/cor ✓ → 16 doação + `experiments/proto_culture/` ✓ →
+17 civilização (madeira/fogo/casas) + `experiments/civilization/` ✓
+(próxima: daemon/território/Oja, a decidir com o usuário).
 
 Trabalhe **apenas na etapa que o usuário indicar**.

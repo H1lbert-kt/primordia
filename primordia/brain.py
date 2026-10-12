@@ -14,10 +14,12 @@ tick's hidden state (``hidden_prev``) through ``W_rec``, then the new state
 is committed back — short-term memory without any new randomness.
 ``think`` stores raw output logits in ``actions``; ``apply_actions`` maps them
 to motion (cinematic: vel = dir(angle) * max_speed * accel), converts the
-eat, emit and donate logits into gates in ``(0, 1)`` (stages 13/16 added
-outputs 3 and 4, decoded with the same scaled sigmoid as the eat gate), and
-drains ``turn_cost`` energy per radian turned (steering is a physical cost,
-stage 9.5).
+eat, emit, donate, gather, build_fire and build_house logits into gates in
+``(0, 1)`` (stages 13/16/17 added outputs 3-7, all decoded with the same
+scaled sigmoid), and drains ``turn_cost`` energy per radian turned (steering
+is a physical cost, stage 9.5). Because the gate slots are decoded in place,
+a completed tick leaves ``actions[i, 2:]`` holding *gates*, not logits —
+consumers that display or average them must not sigmoid again.
 No random numbers are drawn in this module.
 """
 
@@ -93,9 +95,11 @@ def apply_actions(
     term (stage 9.5). Senescence (stage 11): effective top speed shrinks by
     the wear factor ``w = exp(senescence_rate * age)`` — old bodies move
     slower; rate 0 restores stage-10 speed exactly. The eat gate (output 2),
-    emit gate (output 3, stage 13) and donate gate (output 4, stage 16) are
-    all mapped with the same scaled sigmoid into ``(0, 1)``; step decides
-    what each one spends.
+    emit gate (output 3, stage 13), donate gate (output 4, stage 16) and the
+    gather/fire/house gates (outputs 5-7, stage 17) are all mapped with the
+    same scaled sigmoid into ``(0, 1)``; step decides what each one spends.
+    The three stage-17 gates are *decisions*, not rates: step attempts the
+    action when the decoded gate exceeds 0.5 (raw logit positive).
     """
     tau = np.float32(2.0 * np.pi)
     for i in prange(alive.size):
@@ -111,6 +115,11 @@ def apply_actions(
         # donate gate (stage 16): same transform; step's donate phase reads
         # actions[i, 4] as the gift fraction of donate_rate
         actions[i, 4] = np.float32(0.5) * (np.float32(1.0) + np.tanh(actions[i, 4]))
+        # gather gate (stage 17): fraction of gather_rate harvested per tick
+        actions[i, 5] = np.float32(0.5) * (np.float32(1.0) + np.tanh(actions[i, 5]))
+        # build gates (stage 17): step acts when the decoded value > 0.5
+        actions[i, 6] = np.float32(0.5) * (np.float32(1.0) + np.tanh(actions[i, 6]))
+        actions[i, 7] = np.float32(0.5) * (np.float32(1.0) + np.tanh(actions[i, 7]))
 
         a = angle[i] + turn * max_turn
         while a >= tau:

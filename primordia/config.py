@@ -18,7 +18,8 @@ class Config:
     a single source of truth.
     """
 
-    N_OUTPUTS: ClassVar[int] = 5  # accel, turn, eat-gate, emit-gate, donate-gate
+    N_OUTPUTS: ClassVar[int] = 8  # accel, turn, eat, emit, donate, gather,
+    # build_fire, build_house (stage 17 added outputs 5-7)
     N_BODY_TRAITS: ClassVar[int] = 5  # max_speed, size, vision_range, diet, tag_hue
 
     # --- world geometry ---
@@ -95,9 +96,8 @@ class Config:
     smell_radius_cells: int = 1  # (2r+1)^2 cells sensed around the creature
 
     # --- brain ---
-    # 9 keeps brain_params at 446 (34 inputs + 5 outputs + W_rec), inside
-    # the 100-500 parameter budget; 10 with stage 16's donate gate would
-    # push it to 505, over budget.
+    # 9 keeps brain_params at 485 (35 inputs + 8 outputs + W_rec), inside
+    # the 100-500 parameter budget; 10 would push it to 534, over budget.
     hidden_size: int = 9
     weight_init_std: float = 0.5  # std of N(0, std) weights drawn at spawn
 
@@ -179,6 +179,44 @@ class Config:
     # donate_range (the mate search's rule), chosen by physics, not by us.
     donate_rate: float = 0.0  # energy gifted per tick at gate=1
     donate_range: float = 3.0  # world units, nearest living recipient
+
+    # --- civilization base (stage 17: wood, fire, houses) ---
+    # Wood is a second ground field like food: value-noise patches, harvest
+    # depletes, growth refills toward K (and never on water — terrain gates
+    # it like food). Nothing rewards building: the bonus lives in the object
+    # (a campfire cooks, a house shelters) and every step is paid in energy
+    # or carried wood, so whether constructing pays is selection's question.
+    wood_capacity: float = 2.0  # max wood stored in one cell
+    wood_growth_rate: float = 0.01  # fraction of the deficit refilled per tick
+    initial_wood: float = 0.0  # wood per cell at t=0 (0 <= this <= capacity)
+    wood_patch_amplitude: float = 1.0  # 0 = uniform K at wood_capacity
+    wood_patch_scale: float = 60.0  # world units between noise lattice points
+
+    # gather gate (output 5): wood harvested per tick at gate=1, clamped by
+    # both what the cell holds and the carry capacity — hauling wood costs
+    # move_cost like everything else, so transport is physics, not a rule
+    gather_rate: float = 0.5
+    max_inventory: float = 4.0  # wood a creature can carry at once
+
+    # structures (one per cell; a fire burns out without fuel, a house
+    # persists). Units: 1 wood = 1 fuel = 1 energy (calibrated in the
+    # stage-17 pilot; documented so the cook accounting reads honestly)
+    fire_wood_cost: float = 3.0  # wood consumed to build or refuel a fire
+    fire_energy_cost: float = 10.0  # energy consumed to build a fire
+    # a house costs a full pack: the stage-17 plan shipped 6.0 against a
+    # max_inventory of 4.0, which made houses unbuildable (validated below)
+    house_wood_cost: float = 4.0
+    house_energy_cost: float = 20.0
+    fire_initial_fuel: float = 3.0  # fuel charged when a fire is built
+    fire_fuel_decay: float = 0.002  # fuel burned per tick; fire dies at 0
+    fire_radius: float = 6.0  # world units the heat reaches (cook + glow)
+    house_radius: float = 5.0  # world units of bite cover (shelter)
+    # Cooking: food eaten on a heated cell yields cook_bonus x energy, and
+    # the extra is drained 1:1 from the covering fire's fuel — the bonus is
+    # burned wood, never created energy (stage-17 conservation law).
+    cook_bonus: float = 1.5
+    cover_reduction: float = 0.5  # share of bite efficiency lost at full cover
+    max_structures: int = 1024  # fixed structure capacity (SoA allocation)
 
     # --- species clustering (stage 12: metric only, never read by the tick) ---
     # Normalized genome distance at or below which two living creatures are
@@ -276,6 +314,44 @@ class Config:
             raise ValueError("donate_rate must be >= 0")
         if self.donate_range < 0.0:
             raise ValueError("donate_range must be >= 0")
+        if self.wood_capacity <= 0.0:
+            raise ValueError("wood_capacity must be positive (smell normalizer)")
+        if not 0.0 <= self.wood_growth_rate <= 1.0:
+            raise ValueError("wood_growth_rate must be in [0, 1]")
+        if self.initial_wood < 0.0 or self.initial_wood > self.wood_capacity:
+            raise ValueError("need 0 <= initial_wood <= wood_capacity")
+        if not 0.0 <= self.wood_patch_amplitude <= 1.0:
+            raise ValueError("wood_patch_amplitude must be in [0, 1]")
+        if self.wood_patch_scale <= 0.0:
+            raise ValueError("wood_patch_scale must be positive")
+        if self.gather_rate < 0.0:
+            raise ValueError("gather_rate must be >= 0")
+        if self.max_inventory < 0.0:
+            raise ValueError("max_inventory must be >= 0")
+        if min(self.fire_wood_cost, self.fire_energy_cost,
+               self.house_wood_cost, self.house_energy_cost) < 0.0:
+            raise ValueError("construction costs must be >= 0")
+        if self.fire_wood_cost > self.max_inventory or (
+            self.house_wood_cost > self.max_inventory
+        ):
+            # the plan's 6.0/4.0 pair made houses impossible to afford:
+            # inventory is the only wood depot, so a price above the pack
+            # size can never be paid
+            raise ValueError(
+                "fire/house wood costs must fit in max_inventory"
+            )
+        if self.fire_initial_fuel < 0.0:
+            raise ValueError("fire_initial_fuel must be >= 0")
+        if self.fire_fuel_decay < 0.0:
+            raise ValueError("fire_fuel_decay must be >= 0")
+        if self.fire_radius < 0.0 or self.house_radius < 0.0:
+            raise ValueError("fire_radius and house_radius must be >= 0")
+        if self.cook_bonus < 1.0:
+            raise ValueError("cook_bonus must be >= 1.0 (1.0 = no effect)")
+        if not 0.0 <= self.cover_reduction <= 1.0:
+            raise ValueError("cover_reduction must be in [0, 1]")
+        if self.max_structures < 0:
+            raise ValueError("max_structures must be >= 0")
         if self.species_threshold <= 0.0:
             raise ValueError("species_threshold must be positive")
         if self.genealogy_capacity < 0:
@@ -295,9 +371,11 @@ class Config:
         (food, creatures, prey-diet, carrion — stage 11), 2 food antennas
         (left/right of heading), 3 internal sensors (energy, speed,
         ambient light — stage 10's circadian cue), 3 signal slots (smell +
-        left/right antennas over the signal field, stage 13) and, since
-        stage 15, 1 tag slot (hue similarity of the neighbours)."""
-        return self.n_rays * 3 + 13
+        left/right antennas over the signal field, stage 13), 1 tag slot
+        (hue similarity of the neighbours, stage 15) and, since stage 17,
+        1 wood slot (smell of the wood field — without it the gather gate
+        would have nothing to react to)."""
+        return self.n_rays * 3 + 14
 
     @property
     def brain_params(self) -> int:

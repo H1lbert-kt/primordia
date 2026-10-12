@@ -16,16 +16,25 @@ one row per recorded tick in pre-allocated int32/float32 columns:
     signal_cells     (cells above 1% of signal_capacity, gauge every tick:
                       the trail's *area* — a point deposit scores ~1 cell,
                       diffusion spreads it; stage 14 pheromone metric)
-    emit_mean        (mean emit-gate fraction over living creatures, from
-                      the last think's logits — reads 0 when nothing lives)
+    emit_mean        (mean emit-gate fraction over living creatures — the
+                      gate brain.apply_actions already decoded; stage 17
+                      removed a stale second sigmoid that overstated it)
     donated          (per-tick delta of World.energy_donated, stage 16:
                       energy gifted to neighbours this tick)
     donate_mean      (mean donate-gate fraction over living creatures,
-                      from the last think's logits — reads 0 when none)
+                      decoded gate like emit_mean; reads 0 when none)
     donate_align     (mean circular hue alignment of this tick's gift
                       pairs, from World.donate_align_sum/donate_pairs;
                       0 without pairs, in [-1, 1] — the H2 gauge the
                       proto_culture experiment compares to chance)
+    wood_total       (current sum of the wood field, gauge every tick,
+                      stage 17 — the resource the gather gate depletes)
+    wood_gathered    (per-tick delta of World.wood_gathered: wood moved
+                      cell -> inventory this tick)
+    energy_cooked    (per-tick delta of World.energy_cooked: the cooking
+                      bonus granted this tick, equal to the fuel burned)
+    n_fire, n_house  (alive structure counts by type, gauges every tick,
+                      stage 17 — the construction-emergence gates)
     bite_herb, bite_omni, bite_pred
                      (per-tick deltas of World.bite_by_diet, stage 12.5:
                      successful takes grouped by the *attacker's* diet class)
@@ -88,6 +97,8 @@ INT_COLUMNS = (
     "n_herbivore",
     "n_omnivore",
     "n_predator",
+    "n_fire",
+    "n_house",
     "matings_valid",
 )
 FLOAT_COLUMNS = (
@@ -113,6 +124,9 @@ FLOAT_COLUMNS = (
     "donated",
     "donate_mean",
     "donate_align",
+    "wood_total",
+    "wood_gathered",
+    "energy_cooked",
     "hue_mean",
     "hue_spread",
     "tag_sim_mean",
@@ -179,6 +193,8 @@ class StatsRecorder:
         self._prev_bite = np.zeros(3, dtype=np.int64)  # bite_by_diet baseline
         self._prev_signal = np.float64(0.0)  # signal_emitted delta baseline
         self._prev_donated = np.float64(0.0)  # energy_donated delta baseline
+        self._prev_wood = np.float64(0.0)  # wood_gathered delta baseline
+        self._prev_cooked = np.float64(0.0)  # energy_cooked delta baseline
         self._last_dist = np.float32(0.0)
         self._last_diet_p = (np.float32(0.0), np.float32(0.0), np.float32(0.0))
         self._last_n_species = np.float32(0.0)
@@ -269,12 +285,11 @@ class StatsRecorder:
             cols["n_omnivore"][i] = np.int32(np.count_nonzero(diet_labels == 1))
             cols["n_predator"][i] = np.int32(np.count_nonzero(diet_labels == 2))
             cols["diet_max"][i] = np.float32(traits[:, 3].max())
-            cols["emit_mean"][i] = np.float32(
-                0.5 * (1.0 + np.tanh(world.actions[alive, 3])).mean()
-            )
-            cols["donate_mean"][i] = np.float32(
-                0.5 * (1.0 + np.tanh(world.actions[alive, 4])).mean()
-            )
+            # gates arrive already decoded from brain.apply_actions (stage-17
+            # fix: these lines used to sigmoid them a second time and read
+            # ~0.73 for a neutral 0.5 gate — same bug the panel had)
+            cols["emit_mean"][i] = np.float32(world.actions[alive, 3].mean())
+            cols["donate_mean"][i] = np.float32(world.actions[alive, 4].mean())
             # tag hue as a circular variable (stage 15): the arithmetic
             # mean of an angle would land mid-wheel for a bimodal spread
             hue = world.genome[alive, world.config.brain_params + 4]
@@ -331,6 +346,16 @@ class StatsRecorder:
         self._prev_signal = np.float64(world.signal_emitted)
         cols["donated"][i] = np.float32(world.energy_donated - self._prev_donated)
         self._prev_donated = np.float64(world.energy_donated)
+        # stage-17 deltas: wood this tick moved into inventories, and the
+        # cooking bonus granted (equal to the fuel burned for it)
+        cols["wood_gathered"][i] = np.float32(
+            world.wood_gathered - self._prev_wood
+        )
+        self._prev_wood = np.float64(world.wood_gathered)
+        cols["energy_cooked"][i] = np.float32(
+            world.energy_cooked - self._prev_cooked
+        )
+        self._prev_cooked = np.float64(world.energy_cooked)
         # mean hue alignment of this tick's gift pairs (stage 16 H2 gauge);
         # 0 without pairs — never NaN, so plots stay monotone-free of holes
         cols["donate_align"][i] = np.float32(
@@ -341,6 +366,14 @@ class StatsRecorder:
         # full-field sum: 40k float32 adds (~40 µs), cheap next to record's
         # existing trait means; the mass shows whether the field is alive
         cols["signal_mass"][i] = np.float32(world.signal.sum(dtype=np.float64))
+        # wood field total (stage 17): same cost class as signal_mass
+        cols["wood_total"][i] = np.float32(world.wood.sum(dtype=np.float64))
+        cols["n_fire"][i] = np.int32(
+            np.count_nonzero(world.struct_alive & (world.struct_type == 0))
+        )
+        cols["n_house"][i] = np.int32(
+            np.count_nonzero(world.struct_alive & (world.struct_type == 1))
+        )
         # trail area (stage 14): count over the same 40k cells; the point
         # vs extended-structure distinction the physics actually delivers
         cols["signal_cells"][i] = np.float32(

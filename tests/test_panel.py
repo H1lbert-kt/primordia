@@ -134,8 +134,8 @@ def test_panel_shows_cluster_when_cached(ready_world: World) -> None:
     assert not any("species 0" in m for m in with_cache + without)
 
 
-def test_panel_shows_don_gate_and_w2_layout(ready_world: World) -> None:
-    """Stage 16: the outputs list gains the `don` gate and W2 is 5 wide."""
+def test_panel_shows_all_gates_and_w2_layout(ready_world: World) -> None:
+    """Stage 17: the outputs list shows all 8 outputs and W2 is 8 wide."""
     from primordia.render import panel as P
     from primordia.render.settings import Settings
 
@@ -143,6 +143,11 @@ def test_panel_shows_don_gate_and_w2_layout(ready_world: World) -> None:
     slot = int(np.flatnonzero(ready_world.alive)[0])
     messages: list[str] = []
     original = P._text
+    # stage-17 double-sigmoid fix: gates arrive decoded from apply_actions,
+    # so a forced 0.5 gate must print +0.50 (the old second sigmoid printed
+    # +0.62) — set the scratch before rendering, restore after
+    saved_gates = ready_world.actions[slot, 2:8].copy()
+    ready_world.actions[slot, 2:8] = 0.5
 
     def spy(dst, size, msg, x, y, color):
         messages.append(msg)
@@ -155,7 +160,12 @@ def test_panel_shows_don_gate_and_w2_layout(ready_world: World) -> None:
         P.render_panel(surf, ready_world, slot, hud, settings)
     finally:
         P._text = original
+        ready_world.actions[slot, 2:8] = saved_gates
 
-    assert "don" in messages, "donate gate missing from the outputs list"
-    assert any("W2|b2 (5x10)" in m for m in messages), messages
+    for label in ("gate", "emit", "don", "gather", "fire", "house"):
+        assert label in messages, f"output {label!r} missing from the panel"
+    assert "+0.50" in messages, "gate must be shown decoded, not sigmoid(x) again"
+    assert any("W2|b2 (8x10)" in m for m in messages), messages
     assert any("W_rec (9x9)" in m for m in messages), messages
+    assert any("wood " in m and "energy" in m for m in messages), "inventory line"
+    assert any("fire " in m and "house " in m for m in messages), "structure counts"

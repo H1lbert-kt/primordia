@@ -163,9 +163,13 @@ def test_rebuild_conserves_tag_vectors_over_the_grid() -> None:
         )
 
 
-def test_input_groups_ends_with_tag() -> None:
+def test_input_groups_ends_with_tag_then_wood() -> None:
+    """Stage 17 appended the wood smell slot after the tag slot."""
     cfg = make_config()
     label, group = input_groups(cfg)[-1]
+    assert label == "smell wood"
+    assert group == slice(3 * cfg.n_rays + 13, 3 * cfg.n_rays + 14)
+    label, group = input_groups(cfg)[-2]
     assert label == "tag"
     assert group == slice(3 * cfg.n_rays + 12, 3 * cfg.n_rays + 13)
 

@@ -29,12 +29,12 @@ def offsets(cfg: Config) -> tuple[int, int, int, int, int]:
 
 def test_genome_layout() -> None:
     cfg = Config()
-    # 7*3 rays + 4 smell + 2 antennas + 3 internal + 3 signal + 1 tag (stage 15)
-    assert cfg.sensor_input_dim == 34
+    # 7*3 rays + 4 smell + 2 antennas + 3 internal + 3 signal + 1 tag + 1 wood
+    assert cfg.sensor_input_dim == 35
     assert cfg.hidden_size == 9
-    assert cfg.brain_params == 446  # 9*35 + 5*10 + 9*9 (W1, W2, W_rec)
+    assert cfg.brain_params == 485  # 9*36 + 8*10 + 9*9 (W1, W2, W_rec)
     assert 100 <= cfg.brain_params <= 500
-    assert cfg.genome_size == cfg.brain_params + Config.N_BODY_TRAITS == 451
+    assert cfg.genome_size == cfg.brain_params + Config.N_BODY_TRAITS == 490
 
     _w1, _b1, _w2, b2, wrec = offsets(cfg)
     assert b2 + Config.N_OUTPUTS == wrec

@@ -24,11 +24,11 @@ def make_config(**overrides: object) -> Config:
 
 def layout_pins() -> None:
     cfg = Config()
-    assert Config.N_OUTPUTS == 5
-    assert cfg.sensor_input_dim == 34
+    assert Config.N_OUTPUTS == 8
+    assert cfg.sensor_input_dim == 35
     assert cfg.hidden_size == 9
-    assert cfg.brain_params == 446  # 9*35 + 5*10 + 9*9 (W1, W2, W_rec)
-    assert cfg.genome_size == 451
+    assert cfg.brain_params == 485  # 9*36 + 8*10 + 9*9 (W1, W2, W_rec)
+    assert cfg.genome_size == 490
     assert 100 <= cfg.brain_params <= 500
 
 
@@ -149,7 +149,13 @@ def test_donate_phase_sits_between_emit_and_eat() -> None:
     names = [name for name, _ in step.PHASES]
     assert names.index("donate") == names.index("emit_signal") + 1
     assert names.index("donate") < names.index("eat")
-    assert len(names) == 16
+    assert len(names) == 21  # stage 17 added grow_wood/decay_structures/…
+    # stage 17 contract: gather -> build -> rebuild -> eat (a fire built
+    # this tick already cooks this tick; the rebuild sits between them)
+    assert names.index("gather") == names.index("donate") + 1
+    assert names.index("build") == names.index("gather") + 1
+    assert names.index("rebuild_struct_fields") == names.index("build") + 1
+    assert names.index("eat") == names.index("rebuild_struct_fields") + 1
 
 
 def test_gift_map_written_and_cleared() -> None:

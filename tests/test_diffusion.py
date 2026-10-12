@@ -102,7 +102,7 @@ def test_diffusion_zero_is_noop() -> None:
 
 def test_phase_order_runs_diffusion_right_after_decay() -> None:
     names = [name for name, _step in step.PHASES]
-    assert len(names) == 16
+    assert len(names) == 21  # stage 17 added 5 phases
     assert names.index("diffuse_signal") == names.index("decay_signal") + 1
     assert names.index("diffuse_signal") < names.index("age_metabolize")
 

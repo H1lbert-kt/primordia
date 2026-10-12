@@ -234,6 +234,22 @@ def make_terrain_lut(settings: Settings) -> np.ndarray:
     return lut
 
 
+def make_wood_lut(settings: Settings) -> np.ndarray:
+    """256-entry RGB lookup: wood in cell (0..wood_capacity) -> brown ramp.
+
+    Drawn over the terrain and under the food (stage 17): a full cell reads
+    as litter/twigs, depletion shows the ground again.
+    """
+    ramp = np.arange(256, dtype=np.float64)
+    lut = np.zeros((256, 3), dtype=np.uint8)
+    for c in range(3):
+        lut[:, c] = np.interp(
+            ramp, [0.0, 255.0],
+            [settings.wood_low[c], settings.wood_high[c]],
+        ).astype(np.uint8)
+    return lut
+
+
 def creature_colors(world, settings: Settings, light: float) -> np.ndarray:
     """RGB per living creature: hue from diet, brightness from energy x light."""
     slots = np.flatnonzero(world.alive)
@@ -257,21 +273,22 @@ def draw_world(
     camera: Camera,
     food_lut: np.ndarray,
     terrain_lut: np.ndarray,
+    wood_lut: np.ndarray,
     light: float,
     shifts: PixelFormat,
     buffers: FrameBuffers,
     meat_color: tuple[int, int, int] = (140, 40, 36),
     signal_color: tuple[int, int, int] = (150, 90, 220),
 ) -> None:
-    """Write terrain + food + carrion + signal into ``pixels``.
+    """Write terrain + wood + food + carrion + signal into ``pixels``.
 
-    Per cell: ``rgb = lerp(lerp(lerp(terrain, food, a_f), meat, a_m),
-    signal, a_s) * light`` with ``a_f = food / capacity``,
-    ``a_m = clip(meat / capacity, 0, 1)`` and ``a_s = clip(signal /
-    signal_capacity, 0, 1)`` — rich food hides the ground, depletion
-    reveals terrain, carrion paints over both (stage 11), and a call is
-    the last thing painted (stage 13). The blend runs on the 200x200
-    cell grid once per frame; the viewport step is the same single
+    Per cell: ``rgb = lerp(lerp(lerp(lerp(terrain, wood, a_w), food, a_f),
+    meat, a_m), signal, a_s) * light`` with ``a_w = wood / wood_capacity``
+    (stage 17 — the brown litter sits over the ground and under the food,
+    so harvesting reveals it the way depletion reveals terrain), then
+    ``a_f = food / capacity``, ``a_m = clip(meat / capacity, 0, 1)`` and
+    ``a_s = clip(signal / signal_capacity, 0, 1)``. The blend runs on the
+    200x200 cell grid once per frame; the viewport step is the same single
     gather as before.
     """
     cap = float(world.config.food_capacity)
@@ -280,7 +297,12 @@ def draw_world(
     alpha = (f_idx * np.float32(1.0 / 255.0))[..., None]
     food_rgb = food_lut[f_idx].astype(np.float32)
     terrain_rgb = terrain_lut[t_idx].astype(np.float32)
-    rgb = terrain_rgb + (food_rgb - terrain_rgb) * alpha
+    w_cap = float(world.config.wood_capacity)
+    w_idx = np.clip(world.wood * (255.0 / w_cap), 0.0, 255.0).astype(np.intp)
+    wood_a = (w_idx * np.float32(1.0 / 255.0))[..., None]
+    wood_rgb = wood_lut[w_idx].astype(np.float32)
+    rgb = terrain_rgb + (wood_rgb - terrain_rgb) * wood_a
+    rgb = rgb + (food_rgb - rgb) * alpha
     meat_a = np.clip(world.meat * np.float32(1.0 / cap), 0.0, 1.0)[..., None]
     meat_rgb = np.asarray(meat_color, dtype=np.float32)[None, None, :]
     rgb = rgb + (meat_rgb - rgb) * meat_a
@@ -349,6 +371,93 @@ def stamp_creatures(
         return _humanoid_offsets(r, ib, buckets)
 
     _scatter_groups(pixels, ix, iy, key, colors, vw, vh, humanoid_offsets)
+
+
+# Structure sprite masks per (kind, radius) — kind 0 = fire (disc),
+# kind 1 = house (square). Cached like the humanoid poses.
+_STRUCT_CACHE: dict[tuple[int, int], tuple[np.ndarray, np.ndarray]] = {}
+
+
+def _struct_offsets(kind: int, radius: int) -> tuple[np.ndarray, np.ndarray]:
+    """Pixel offsets of one structure sprite, centered on (0, 0)."""
+    key = (kind, radius)
+    if key not in _STRUCT_CACHE:
+        side = 2 * radius + 1
+        surf = pygame.Surface((side, side), pygame.SRCALPHA)
+        c = side // 2
+        if kind == 0:
+            pygame.draw.circle(surf, (255, 255, 255, 255), (c, c), radius)
+        else:
+            pygame.draw.rect(
+                surf,
+                (255, 255, 255, 255),
+                (c - radius, c - radius, 2 * radius + 1, 2 * radius + 1),
+            )
+        alpha = pygame.surfarray.pixels_alpha(surf)
+        ox, oy = np.nonzero(alpha > 127)
+        _STRUCT_CACHE[key] = (
+            ox.astype(np.int32) - c,
+            oy.astype(np.int32) - c,
+        )
+    return _STRUCT_CACHE[key]
+
+
+def stamp_structures(
+    pixels: np.ndarray,
+    world,
+    camera: Camera,
+    settings: Settings,
+    shifts: PixelFormat,
+    light: float,
+) -> None:
+    """Scatter fires and houses into the frame (stage 17).
+
+    Called between the cell blend and :func:`stamp_creatures`, so walking
+    creatures paint over the objects. A fire flickers **deterministically**
+    — a pure function of ``(tick, slot)``, never RNG — and dims with its
+    remaining fuel (a dying fire glows weak); a house is flat. Both dim
+    with the ambient light like the rest of the world. Nothing here reads
+    scratch that the simulation depends on, so recording stays bit-identical.
+    """
+    slots = np.flatnonzero(world.struct_alive)
+    if slots.size == 0:
+        return
+    vh = pixels.shape[1]
+    vw = pixels.shape[0]
+    sx, sy = camera.world_to_screen(world.struct_pos[slots])
+    ix = np.rint(sx).astype(np.int32)
+    iy = np.rint(sy).astype(np.int32)
+    radius = max(2, int(round(settings.struct_world_size * camera.zoom)))
+    kinds = world.struct_type[slots].astype(np.int32)
+    key = kinds * 4096 + radius  # radius << 12 (zoom is clamped to 10)
+
+    rgb = np.empty((slots.size, 3), dtype=np.float64)
+    house_mask = kinds != 0
+    rgb[house_mask] = settings.house_color
+    fire = ~house_mask
+    if np.any(fire):
+        fuel_cap = float(world.config.fire_initial_fuel)
+        fuel01 = (
+            world.struct_fuel[slots[fire]] / fuel_cap
+            if fuel_cap > 0.0
+            else np.ones(int(fire.sum()))
+        )
+        np.clip(fuel01, 0.0, 1.0, out=fuel01)
+        flick = 0.78 + 0.22 * np.sin(
+            np.float64(world.tick) * 0.9 + slots[fire] * 1.7
+        )
+        dim = (0.45 + 0.55 * fuel01) * flick * float(light)
+        rgb[fire] = np.asarray(settings.fire_color, dtype=np.float64) * dim[:, None]
+    rgb[house_mask] = rgb[house_mask] * float(light)
+    np.clip(rgb, 0.0, 255.0, out=rgb)
+
+    colors = rgb_to_pixel(rgb.astype(np.uint8), shifts)
+
+    def struct_offsets_fn(kv: int) -> tuple[np.ndarray, np.ndarray]:
+        kind, r = divmod(kv, 4096)
+        return _struct_offsets(kind, r)
+
+    _scatter_groups(pixels, ix, iy, key, colors, vw, vh, struct_offsets_fn)
 
 
 def pick_creature(

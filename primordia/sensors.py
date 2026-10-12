@@ -27,6 +27,10 @@ Input vector layout (``Config.sensor_input_dim`` floats, written into
                              (self removed) with the creature's own unit
                              vector / cells: +1 = everyone here shares my
                              colour, ~0 = alone or unaligned, <0 = opposite
+    [3n+13 : 3n+14)          wood (stage 17): smell of the wood field in the
+                             same window / (wood_capacity * cells), the
+                             information the gather gate needs to discover
+                             harvesting at all
 
 Rays march in steps of one cell up to the creature's ``vision_range`` body
 trait times the current light level ``L(t)`` (seeing in the dark is seeing
@@ -74,6 +78,7 @@ def input_groups(config: Config) -> tuple[tuple[str, slice | np.ndarray], ...]:
         ("light", slice(smell + 8, smell + 9)),
         ("signal", slice(smell + 9, smell + 12)),
         ("tag", slice(smell + 12, smell + 13)),
+        ("smell wood", slice(smell + 13, smell + 14)),
     )
 
 
@@ -89,6 +94,7 @@ def perceive(
     food: np.ndarray,
     meat: np.ndarray,
     signal: np.ndarray,
+    wood: np.ndarray,
     cell_counts: np.ndarray,
     cell_diet: np.ndarray,
     cell_tag_re: np.ndarray,
@@ -111,11 +117,13 @@ def perceive(
     energy_scale: np.float32,
     light: np.float32,
     signal_capacity: np.float32,
+    wood_capacity: np.float32,
     senescence_rate: np.float32,
 ) -> None:
     """Fill ``sensor_buf[i]`` for every living creature (parallel over slots)."""
     inv_cap = np.float32(1.0) / food_capacity
     inv_e = np.float32(1.0) / energy_scale
+    inv_wood = np.float32(1.0) / wood_capacity
     smell_side = 2 * smell_r + 1
     inv_smell = np.float32(1.0) / (smell_side * smell_side)
     inv_side = np.float32(2.0) * inv_smell  # antennas see ~half the window
@@ -212,6 +220,8 @@ def perceive(
         # excluded below — "are the creatures around me my colour?"
         str_ = np.float32(0.0)
         sti_ = np.float32(0.0)
+        # wood (stage 17): the gather gate's only information source
+        swood = np.float32(0.0)
         for dy in range(-smell_r, smell_r + 1):
             for dx in range(-smell_r, smell_r + 1):
                 iy = iy0 + dy
@@ -231,6 +241,7 @@ def perceive(
                 scarrion = scarrion + meat[iy, ix]
                 str_ = str_ + cell_tag_re[iy, ix]
                 sti_ = sti_ + cell_tag_im[iy, ix]
+                swood = swood + wood[iy, ix]
                 sig = signal[iy, ix]
                 ssig = ssig + sig
                 cross = c * np.float32(dy) - s * np.float32(dx)
@@ -275,3 +286,7 @@ def perceive(
         sensor_buf[i, base + 12] = (
             (str_ - own_re) * own_re + (sti_ - own_im) * own_im
         ) * inv_smell
+
+        # wood smell (stage 17): window sum normalized by capacity * cells,
+        # in [0, 1] for a full window of maxed-out cells (gather's input)
+        sensor_buf[i, base + 13] = swood * inv_wood * inv_smell

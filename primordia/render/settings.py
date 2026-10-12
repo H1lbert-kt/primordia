@@ -54,6 +54,17 @@ class Settings:
     terrain_mid: tuple[int, int, int] = (58, 88, 42)
     terrain_high: tuple[int, int, int] = (34, 104, 40)
 
+    # wood field (stage 17): brown ramp blended over the terrain and *under*
+    # the food layer — rich food covers the litter, harvesting reveals it
+    wood_low: tuple[int, int, int] = (66, 46, 30)
+    wood_high: tuple[int, int, int] = (176, 128, 74)
+
+    # structure sprites (stage 17): fire flickers deterministically from
+    # (tick, slot) and dims with its fuel; house is flat, both dim by light
+    fire_color: tuple[int, int, int] = (255, 138, 44)
+    house_color: tuple[int, int, int] = (214, 196, 158)
+    struct_world_size: float = 2.0  # world units -> pixel radius via zoom
+
     # carrion overlay (stage 11): dark red blended over ground+food with
     # alpha = clip(meat / food_capacity, 0, 1); full cell reads as raw meat
     meat_color: tuple[int, int, int] = (140, 40, 36)
