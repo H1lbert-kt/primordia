@@ -121,7 +121,13 @@ def main() -> None:
         prefix = "gate_"
 
     for tag, house_energy in variants:
-        cfg = replace(base, house_energy_cost=house_energy)
+        # stage 22 turned houses off in Config defaults; this experiment
+        # studies them, so it re-enables them. Note: stage 22 also made
+        # payment incremental (per delivery, not per house) — the cached
+        # npz files preserve the stage-17 lump results, but a --force
+        # re-run today measures the new mechanics at the same totals.
+        cfg = replace(base, house_energy_cost=house_energy,
+                      houses_enabled=True)
         print(f"variant {tag} house_energy_cost={cfg.house_energy_cost:g} "
               f"house_wood_cost={cfg.house_wood_cost:g}", flush=True)
         for seed in seeds:

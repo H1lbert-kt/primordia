@@ -18,8 +18,10 @@ never resized. Array dtypes are part of the module contract:
     signal (H,W) float32 (scalar channel, stage 13; diffusion scratch
     signal_buf (H,W) float32 is the stage-14 Jacobi staging buffer),
     struct_pos (S,2) float32, struct_type (S,) uint8 (0=fire, 1=house),
-    struct_fuel (S,) float32, struct_store (S,) float32 (deposit slot,
-        inert until the territory stage), struct_owner (S,) int32
+    struct_fuel (S,) float32, struct_store (S,) float32 (unused for
+        fires; house completeness u in [0, 1] since stage 22 — the
+        shelter stamped on the ground is cover_reduction * u),
+    struct_owner (S,) int32
         (builder's creature id), struct_alive (S,) bool,
     struct_free_list (S,) int32   # stage-17 structures, fixed capacity S
     struct_grid/struct_fire (H,W) int32, fire_heat/cover (H,W) float32
@@ -143,6 +145,7 @@ def _rebuild_grid(
 def _stamp_structures(
     struct_pos: np.ndarray,
     struct_type: np.ndarray,
+    struct_store: np.ndarray,
     struct_alive: np.ndarray,
     struct_grid: np.ndarray,
     struct_fire: np.ndarray,
@@ -165,6 +168,8 @@ def _stamp_structures(
     the same one. A structure occupies its exact cell (``struct_grid``)
     plus, within its radius, heat/cover stamped at cell-center distance
     with a toroidal delta (``fire_radius = 0`` keeps only the exact cell).
+    Houses stamp their completeness ``struct_store`` (0..1, stage 22)
+    with a max-merge, so cover is the shelter share, never more than 1.
     """
     hw = width * np.float32(0.5)
     hh = height * np.float32(0.5)
@@ -229,7 +234,14 @@ def _stamp_structures(
                     elif dx < -hw:
                         dx = dx + width
                     if dx * dx + dy * dy <= r2:
-                        cover[iy % gh, ix % gw] = 1.0
+                        jy = iy % gh
+                        jx = ix % gw
+                        # stage 22: shelter scales with completeness u
+                        # (struct_store); max-merge so overlapping houses
+                        # never erase each other's cover
+                        v = struct_store[s]
+                        if v > cover[jy, jx]:
+                            cover[jy, jx] = v
 
 
 class World:
@@ -537,6 +549,7 @@ class World:
         _stamp_structures(
             self.struct_pos,
             self.struct_type,
+            self.struct_store,
             self.struct_alive,
             self.struct_grid,
             self.struct_fire,
@@ -592,6 +605,16 @@ class World:
         self.genome[slots, traits + 5] = 0.0  # plasticity eta (stage 21): born
         # unlearned; only mutation can turn learning on, and it always pays
         # plasticity_cost — selection decides whether the gene is worth it
+        if cfg.build_house_bias != 0.0:
+            # stage 22: a spawn-time prior against attempting a house; the
+            # logit sits at genome column b2[7] (build_house output). No
+            # RNG is drawn, so worlds with bias 0 keep their old stream.
+            b2_off = (
+                cfg.hidden_size * cfg.sensor_input_dim
+                + cfg.hidden_size
+                + cfg.N_OUTPUTS * cfg.hidden_size
+            )
+            self.genome[slots, b2_off + 7] += np.float32(cfg.build_house_bias)
 
         self.species_id[slots] = 0
         self.parent_id[slots] = -1

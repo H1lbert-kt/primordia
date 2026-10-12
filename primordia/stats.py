@@ -127,6 +127,7 @@ FLOAT_COLUMNS = (
     "wood_total",
     "wood_gathered",
     "energy_cooked",
+    "inventory_mean",  # carried wood (stage 22): hauling under carry_weight
     "hue_mean",
     "hue_spread",
     "tag_sim_mean",
@@ -134,6 +135,7 @@ FLOAT_COLUMNS = (
     "genome_dist",
     "n_species",
     "barrier",
+    "house_progress",  # mean completeness u of alive houses (stage 22)
 )
 COLUMNS = INT_COLUMNS + FLOAT_COLUMNS
 
@@ -366,6 +368,12 @@ class StatsRecorder:
         # full-field sum: 40k float32 adds (~40 µs), cheap next to record's
         # existing trait means; the mass shows whether the field is alive
         cols["signal_mass"][i] = np.float32(world.signal.sum(dtype=np.float64))
+        # carried wood (stage 22): the pack the hauling tax multiplies
+        cols["inventory_mean"][i] = (
+            np.float32(world.inventory[world.alive].mean())
+            if world.alive_count
+            else np.float32(0.0)
+        )
         # wood field total (stage 17): same cost class as signal_mass
         cols["wood_total"][i] = np.float32(world.wood.sum(dtype=np.float64))
         cols["n_fire"][i] = np.int32(
@@ -373,6 +381,14 @@ class StatsRecorder:
         )
         cols["n_house"][i] = np.int32(
             np.count_nonzero(world.struct_alive & (world.struct_type == 1))
+        )
+        # mean completeness of alive houses (stage 22): 0 with none,
+        # 1 when every house is finished — the shape of the build curve
+        houses = world.struct_alive & (world.struct_type == 1)
+        cols["house_progress"][i] = (
+            np.float32(world.struct_store[houses].mean())
+            if np.any(houses)
+            else np.float32(0.0)
         )
         # trail area (stage 14): count over the same 40k cells; the point
         # vs extended-structure distinction the physics actually delivers

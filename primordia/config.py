@@ -209,16 +209,42 @@ class Config:
     # per build while the cook bonus returns more, and the gate (3 seeds
     # x 10k) ended 1163/1170/821 alive vs 3/86/70 at the old 10.0/20.0.
     fire_energy_cost: float = 5.0  # energy consumed to build a fire
-    # a house costs a full pack: the stage-17 plan shipped 6.0 against a
-    # max_inventory of 4.0, which made houses unbuildable (validated below)
-    house_wood_cost: float = 4.0
-    # Prohibitive on purpose (stage 18): at 20.0 the default world built
-    # ~380 houses by 5k ticks and starved the population to 3 (3/86/70
-    # alive across seeds 42/7/13). No creature accumulates 1e6 (typical
-    # peak energy is ~100), and payment is all-or-nothing, so the default
-    # world never builds houses; experiments override this price, as the
-    # stage-17 pilot/gate already did (20/12/8).
-    house_energy_cost: float = 1_000_000.0
+    # a house is raised in INCREMENTS (stage 22): the totals below are
+    # paid in wood deliveries (all-or-nothing per delivery, never per
+    # house) and the shelter scales with completeness u in [0, 1]
+    # (stored in struct_store). Stage 17's lump price is gone.
+    house_wood_cost: float = 4.0  # total wood of a complete house
+    # Total energy of a complete house, charged as energy_cost * du per
+    # delivery. The stage-18 prohibitive 1e6 default died with the lump
+    # design: houses are off by default through `houses_enabled` now.
+    house_energy_cost: float = 3.0
+    # Off by default (stage 22): the default Config is the baseline the
+    # older experiments measured; presets (configs/houses.toml) enable
+    # houses. False = the build_house gate is a no-op.
+    houses_enabled: bool = False
+    # Incomplete houses rot: u -= house_rot_rate * (1 - u) per tick; at
+    # u <= 0 the structure dies and its slot is recycled. Complete
+    # houses (u = 1) never decay (stage-17 rule, now scoped to finished
+    # houses only).
+    house_rot_rate: float = 0.01
+    # If > 0, every house delivery requires a live fire within this
+    # radius (world units, toroidal) of the building cell — the fire is
+    # the step before the house. 0 = no requirement.
+    house_fire_radius: float = 0.0
+    # Hauling tax (stage 22): movement costs
+    # move_cost * |v|^2 * (1 + carry_weight * inventory/max_inventory).
+    # 0 = carrying is free, bit-identical to the pre-stage-22 world.
+    carry_weight: float = 0.0
+    # Spawn-time prior on the build_house output logit (b2[7]): a
+    # negative value makes attempting a house rare at birth; mutation
+    # can evolve it up (selection decides, nothing is hard-coded).
+    # 0 = the old N(0, weight_init_std) prior, bit-identical worlds.
+    build_house_bias: float = 0.0
+    # Offspring placement: child = parent + N(0, birth_spread) with
+    # toroidal wrap; 0 = born on the parent's cell (pre-stage-22
+    # behaviour, no RNG draw). Local parentage means a house cluster can
+    # become a multi-generational neighbourhood.
+    birth_spread: float = 0.0
     fire_initial_fuel: float = 3.0  # fuel charged when a fire is built
     fire_fuel_decay: float = 0.002  # fuel burned per tick; fire dies at 0
     fire_radius: float = 6.0  # world units the heat reaches (cook + glow)
@@ -388,15 +414,22 @@ class Config:
         if min(self.fire_wood_cost, self.fire_energy_cost,
                self.house_wood_cost, self.house_energy_cost) < 0.0:
             raise ValueError("construction costs must be >= 0")
-        if self.fire_wood_cost > self.max_inventory or (
-            self.house_wood_cost > self.max_inventory
-        ):
-            # the plan's 6.0/4.0 pair made houses impossible to afford:
-            # inventory is the only wood depot, so a price above the pack
-            # size can never be paid
-            raise ValueError(
-                "fire/house wood costs must fit in max_inventory"
-            )
+        if self.house_wood_cost <= 0.0:
+            raise ValueError("house_wood_cost must be positive")
+        if self.fire_wood_cost > self.max_inventory:
+            # the fire is still an all-or-nothing lump: inventory is the
+            # only wood depot, so a price above the pack can never be paid
+            raise ValueError("fire wood cost must fit in max_inventory")
+        if not 0.0 <= self.house_rot_rate < 1.0:
+            raise ValueError("house_rot_rate must be in [0, 1)")
+        if self.house_fire_radius < 0.0:
+            raise ValueError("house_fire_radius must be >= 0")
+        if self.carry_weight < 0.0:
+            raise ValueError("carry_weight must be >= 0")
+        if self.build_house_bias > 4.0 or self.build_house_bias < -4.0:
+            raise ValueError("build_house_bias must be in [-4, 4]")
+        if self.birth_spread < 0.0:
+            raise ValueError("birth_spread must be >= 0")
         if self.fire_initial_fuel < 0.0:
             raise ValueError("fire_initial_fuel must be >= 0")
         if self.fire_fuel_decay < 0.0:

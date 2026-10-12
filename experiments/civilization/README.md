@@ -160,3 +160,17 @@ PASS**, 2489–3054 births, 45k–94k cooked per run. The chosen price sits
 on the bracket's cheap boundary — if a future balance pass moves it
 down again, re-run this sweep first.
 
+## Postscript (stage 22 — houses rebuilt, default still off)
+
+Stage 22 rewrote the *house object* (this experiment's lump payment is
+gone): wood is now delivered in increments, cover scales with
+completeness, unfinished houses rot, carrying wood costs extra movement,
+and each delivery wants a live fire nearby. The Config default flipped
+to `houses_enabled = false`, so the script re-enables houses explicitly;
+the cached `data/` npz files still hold the stage-17 lump results
+(unchanged, still what the figures above show), and a `--force` re-run
+today would measure the new incremental mechanics at the same totals —
+a different experiment, not a reproduction. The follow-up question the
+old house could not ask — *can an incremental house ever pay for itself?*
+— is `experiments/houses/`, and the answer there is a published null.
+

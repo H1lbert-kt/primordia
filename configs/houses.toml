@@ -1,0 +1,42 @@
+# Houses (stage 22) on the proto-culture context.
+#
+# The default Config keeps houses off (houses_enabled=false): the
+# default world has ~4-43 predation deaths per run, so cover never pays
+# for itself there — a house would be a pure energy drain (stage 17's
+# collapse, stage 18's 1e6 lockout). Shelter only has a chance where
+# being bitten is a real, frequent risk, which is exactly the
+# experiments/predator_survival "reach" variant pinned in
+# configs/proto_culture.toml. This file duplicates those pins (the TOML
+# loader has no include mechanism) and turns the stage-22 design on:
+#
+#   houses raised in wood DELIVERIES (all-or-nothing per delivery, not
+#   per house), cover scales with completeness u, unfinished houses rot,
+#   carrying wood is dearer than holding it, a spawn-time bias keeps the
+#   build gate mostly closed, and every delivery needs a live fire
+#   within house_fire_radius — the fire is the step before the house.
+#
+# house_fire_radius=6.0, not the plan's draft 3.0: with cell_size 5.0
+# the fire owns its own cell, so the nearest free cell centre is 5.0
+# away and a radius of 3 makes every house impossible (a documented
+# trap, not a price). 6.0 reaches a builder standing in the adjacent
+# cell — the smallest honest "next to the fire" gate.
+#
+# Prices here are the stage-22 pilot's mid point (wood 4 + energy 3 =
+# the pack-affordable total the pilot swept around); the experiment
+# overrides them per variant. Usage:
+#
+#   python run.py --config configs/houses.toml --seed 42 --headless --ticks 10000
+bite_rate = 12.0
+contact_range = 2.5
+signal_emit_cost = 0.05
+plasticity_mode = "gene"
+plasticity_cost = 1.0
+plasticity_eta_std = 0.01
+houses_enabled = true
+house_wood_cost = 4.0
+house_energy_cost = 3.0
+house_rot_rate = 0.01
+house_fire_radius = 6.0
+carry_weight = 1.0
+build_house_bias = -1.5
+birth_spread = 0.0

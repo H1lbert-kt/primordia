@@ -125,6 +125,7 @@ def _reproduce(
     width: np.float32,
     height: np.float32,
     mate_range: np.float32,
+    birth_spread: np.float32,
     tick: np.int32,
     next_id: np.int32,
     genealogy_used: np.int32,
@@ -306,9 +307,25 @@ def _reproduce(
                 e = MAX_ETA
             genome[child, t + 5] = e
 
-        # Child state: born in place, initiator tracked for the lineage.
+        # Child state: born at the initiator. Stage 22 exposes the
+        # placement: birth_spread = 0 keeps the child on the parent's
+        # cell (no RNG draw, the old world); > 0 jitters the spawn so a
+        # house neighbourhood is not automatically inherited cell-exact.
         pos[child, 0] = pos[i, 0]
         pos[child, 1] = pos[i, 1]
+        if birth_spread > 0.0:
+            x = pos[child, 0] + np.random.normal(0.0, birth_spread)
+            y = pos[child, 1] + np.random.normal(0.0, birth_spread)
+            while x < 0.0:
+                x = x + width
+            while x >= width:
+                x = x - width
+            while y < 0.0:
+                y = y + height
+            while y >= height:
+                y = y - height
+            pos[child, 0] = x
+            pos[child, 1] = y
         vel[child, 0] = 0.0
         vel[child, 1] = 0.0
         angle[child] = angle[i]

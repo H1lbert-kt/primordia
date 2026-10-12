@@ -19,7 +19,9 @@ profiler in ``bench``):
        tick's sources emit, so a deposit is picked up from the *next*
        tick onward)
     6. decay structures (serial; every fire burns fire_fuel_decay fuel and
-       dies at 0, stage 17 — a house persists until rules of its own exist)
+       dies at 0, stage 17; every incomplete house rots at
+       house_rot_rate * (1 - u) and dies at 0, stage 22 — a finished
+       house (u = 1) persists)
     7. age + metabolize (parallel over slots, alive only; energy drains by
        metabolic_cost * wear plus move_cost * |vel|^2, wear =
        exp(senescence_rate * age), stage 11)
@@ -43,15 +45,17 @@ profiler in ``bench``):
         the same tick, no latency; who may receive is physics, whether to
         give is the gate)
     14. gather          (serial: wood moves cell -> inventory, budgeted by
-        gather_rate * gate and clamped both ends, stage 17 — hauling is
-        free to store, not to carry: movement still costs move_cost)
-    15. build           (serial: gates > 0.5 spend carried wood + energy
-        into a structure on the creature's cell; build_fire on an existing
-        fire refuels it with carried wood at no energy cost, stage 17 —
-        whether building pays is never our call, only selection's)
+        gather_rate * gate and clamped both ends, stage 17 — storing is
+        free; since stage 22 carrying can cost extra via carry_weight)
+    15. build           (serial: gates > 0.5 act; fire is still a lump
+        build/refuel, houses are raised in wood deliveries with
+        energy charged per delivered fraction (stage 22), completeness
+        u lives in struct_store and the shelter scales with u; if
+        house_fire_radius > 0 a live fire must burn within that radius)
     16. rebuild structure fields (zero + stamp: exact-cell occupancy,
-        fire heat radius, house cover radius — a fire built this tick
-        already cooks this tick: an object is not a signal, stage 17)
+        fire heat radius, house cover stamped at completeness u —
+        a fire built this tick already cooks this tick: an object is
+        not a signal, stage 17)
     17. eat             (serial: shared cells; food first, then carrion;
         extraction * gate; food eaten under fire earns cook_bonus x energy
         paid 1:1 from that fire's fuel, stage 17 — never created energy)
@@ -112,6 +116,7 @@ def _age_and_metabolize(
     alive: np.ndarray,
     vel: np.ndarray,
     pos: np.ndarray,
+    inventory: np.ndarray,
     cost: np.float32,
     move_cost: np.float32,
     terrain: np.ndarray,
@@ -119,11 +124,17 @@ def _age_and_metabolize(
     inv_cell_h: np.float32,
     water_move_cost: np.float32,
     senescence_rate: np.float32,
+    carry_weight: np.float32,
+    max_inventory: np.float32,
 ) -> None:
     """Age, then drain metabolism (x wear) plus movement (x water, stage 10).
 
     Wear = ``exp(senescence_rate * age)`` (stage 11): the metabolic bill
     grows exponentially with age; rate 0 restores the flat stage-10 cost.
+    Hauling tax (stage 22): movement is multiplied by
+    ``1 + carry_weight * inventory / max_inventory`` — wood is free to
+    store, dear to carry, so supply lines price long builds. The branch
+    is skipped entirely at ``carry_weight = 0`` (bit-identical world).
     """
     gh = terrain.shape[0]
     gw = terrain.shape[1]
@@ -135,6 +146,11 @@ def _age_and_metabolize(
                 metabolic = cost * np.exp(senescence_rate * np.float32(age[i]))
             speed2 = vel[i, 0] * vel[i, 0] + vel[i, 1] * vel[i, 1]
             move = move_cost * speed2
+            if carry_weight > 0.0 and inventory[i] > 0.0:
+                move = move * (
+                    np.float32(1.0)
+                    + carry_weight * (inventory[i] / max_inventory)
+                )
             # swimming costs extra: water cells are exact 0.0 in terrain
             cx = int(pos[i, 0] * inv_cell_w)
             cy = int(pos[i, 1] * inv_cell_h)
@@ -213,32 +229,49 @@ def _diffuse_signal(
 def _decay_structures(
     struct_type: np.ndarray,
     struct_fuel: np.ndarray,
+    struct_store: np.ndarray,
     struct_alive: np.ndarray,
     struct_free_list: np.ndarray,
     struct_free_count: np.int32,
     fuel_decay: np.float32,
+    house_rot_rate: np.float32,
 ) -> tuple[int, int]:
-    """Serial: every fire burns ``fire_fuel_decay`` fuel per tick (stage 17).
+    """Serial: fires burn fuel, incomplete houses rot (stage 17 + 22).
 
-    A fire at ``fuel <= 0`` dies and its slot returns to the structure
-    free-list; a house never decays (no rule owns its end yet — silence is
-    not permission to invent one). Returns ``(free_count, n_died)``. Cells
-    still point at the dead slot until phase 15's rebuild, so readers must
-    check ``struct_alive`` (the build kernel does).
+    Every fire loses ``fire_fuel_decay`` fuel per tick and dies at 0.
+    Every house below completeness 1.0 loses ``house_rot_rate * (1 - u)``
+    per tick (stage 22: an abandoned stub cannot linger) and dies at
+    u <= 0; a complete house (u = 1) never decays. Dead slots return to
+    the structure free-list. Returns ``(free_count, n_died)``. Cells
+    still point at the dead slot until phase 15's rebuild, so readers
+    must check ``struct_alive`` (the build kernel does).
     """
     n_died = 0
     for s in range(struct_alive.size):
-        if not struct_alive[s] or struct_type[s] != 0:
+        if not struct_alive[s]:
             continue
-        fuel = struct_fuel[s] - fuel_decay
-        if fuel <= 0.0:
-            struct_alive[s] = False
-            struct_fuel[s] = 0.0
-            struct_free_list[struct_free_count] = s
-            struct_free_count = struct_free_count + 1
-            n_died = n_died + 1
+        if struct_type[s] == 0:
+            fuel = struct_fuel[s] - fuel_decay
+            if fuel <= 0.0:
+                struct_alive[s] = False
+                struct_fuel[s] = 0.0
+                struct_free_list[struct_free_count] = s
+                struct_free_count = struct_free_count + 1
+                n_died = n_died + 1
+            else:
+                struct_fuel[s] = fuel
         else:
-            struct_fuel[s] = fuel
+            u = struct_store[s]
+            if u < 1.0:
+                u = u - house_rot_rate * (np.float32(1.0) - u)
+                if u <= 0.0:
+                    struct_alive[s] = False
+                    struct_store[s] = 0.0
+                    struct_free_list[struct_free_count] = s
+                    struct_free_count = struct_free_count + 1
+                    n_died = n_died + 1
+                else:
+                    struct_store[s] = u
     return struct_free_count, n_died
 
 
@@ -563,27 +596,40 @@ def _build(
     house_wood_cost: np.float32,
     house_energy_cost: np.float32,
     fire_initial_fuel: np.float32,
+    houses_enabled: bool,
+    house_fire_radius: np.float32,
+    width: np.float32,
+    height: np.float32,
 ) -> int:
-    """Serial: attempt construction and refuelling (stage 17).
+    """Serial: construction and refuelling (stage 17; stage 22 rewrite).
 
     A gate decoded above 0.5 (raw logit positive) is a *decision*; physics
-    then demands full payment — carried ``*_wood_cost`` wood plus
-    ``*_energy_cost`` energy, all-or-nothing, no debt (energy can reach
-    exactly 0 and the deaths phase may finish the story). Rules per cell:
+    then demands payment. Rules per cell:
 
     - ``build_fire`` on an existing live fire refuels it: carried wood
       converts 1:1 into fuel up to ``fire_initial_fuel``, free of energy
       cost (stocking the pile is effort enough).
     - ``build_fire`` on an empty cell (or a dead occupant's cell — the
-      grid is one rebuild stale) raises a fire at full price.
-    - ``build_house`` only on an empty cell; houses and fires never share
-      a cell, and nothing demolishes anything (no rule owns that yet).
+      grid is one rebuild stale) raises a fire at full lump price.
+    - ``build_house`` (only when ``houses_enabled``) raises a house in
+      **increments** (stage 22): each attempt delivers
+      ``dW = min(carried wood, wood still needed)`` and pays
+      ``house_energy_cost * dW / house_wood_cost`` energy — all-or-nothing
+      *per delivery*, never per house. Completeness ``u`` lives in
+      ``struct_store`` (0..1); the shelter stamped on the ground is
+      ``cover_reduction * u``, so a half-built house half-protects. If
+      ``house_fire_radius > 0`` every delivery additionally requires a
+      live fire within that radius of the building cell — the fire is the
+      step before the house. A house slot is only created when a delivery
+      actually completes (no empty shells from failed attempts).
 
     The fire gate is evaluated first and writes ``struct_grid`` on
     creation, so same-tick duplicates see the fresh structure. Slot order
     is ascending and no random numbers are drawn. Returns the new
     ``struct_free_count``.
     """
+    hw = width * np.float32(0.5)
+    hh = height * np.float32(0.5)
     for i in range(alive.size):
         if not alive[i]:
             continue
@@ -626,26 +672,60 @@ def _build(
                     struct_grid[cy, cx] = s  # same tick sees the new fire
                     inventory[i] = inventory[i] - fire_wood_cost
                     energy[i] = energy[i] - fire_energy_cost
-        if gate_house > 0.5:
+        if gate_house > 0.5 and houses_enabled:
             # re-read: the fire branch may have just built on this cell
             slot = struct_grid[cy, cx]
-            if (slot < 0 or not struct_alive[slot]) and struct_free_count > 0:
-                if (
-                    inventory[i] >= house_wood_cost
-                    and energy[i] >= house_energy_cost
-                ):
-                    s = struct_free_list[struct_free_count - 1]
-                    struct_free_count = struct_free_count - 1
-                    struct_pos[s, 0] = pos[i, 0]
-                    struct_pos[s, 1] = pos[i, 1]
-                    struct_type[s] = 1
-                    struct_fuel[s] = 0.0
-                    struct_store[s] = 0.0
-                    struct_owner[s] = creature_id[i]
-                    struct_alive[s] = True
-                    struct_grid[cy, cx] = s
-                    inventory[i] = inventory[i] - house_wood_cost
-                    energy[i] = energy[i] - house_energy_cost
+            s = -1
+            if slot >= 0 and struct_alive[slot] and struct_type[slot] == 1:
+                s = slot  # continue the existing (incomplete) house
+            elif (slot < 0 or not struct_alive[slot]) and struct_free_count > 0:
+                s = -2  # candidate: only materialise once a delivery pays
+            # s == -1 means a live fire owns the cell: no delivery at all
+            if s >= 0 or s == -2:
+                u = struct_store[s] if s >= 0 else np.float32(0.0)
+                wood_need = house_wood_cost * (np.float32(1.0) - u)
+                d_w = inventory[i] if inventory[i] < wood_need else wood_need
+                ok = d_w > 0.0 and energy[i] >= house_energy_cost * (
+                    d_w / house_wood_cost
+                )
+                if ok and house_fire_radius > 0.0:
+                    # a live fire must burn within radius of this cell
+                    ok = False
+                    for t in range(struct_pos.shape[0]):
+                        if not struct_alive[t] or struct_type[t] != 0:
+                            continue
+                        dx = struct_pos[t, 0] - pos[i, 0]
+                        dy = struct_pos[t, 1] - pos[i, 1]
+                        if dx > hw:
+                            dx = dx - width
+                        elif dx < -hw:
+                            dx = dx + width
+                        if dy > hh:
+                            dy = dy - height
+                        elif dy < -hh:
+                            dy = dy + height
+                        if dx * dx + dy * dy <= house_fire_radius * house_fire_radius:
+                            ok = True
+                            break
+                if ok:
+                    if s == -2:  # first delivery: raise the structure
+                        s = struct_free_list[struct_free_count - 1]
+                        struct_free_count = struct_free_count - 1
+                        struct_pos[s, 0] = pos[i, 0]
+                        struct_pos[s, 1] = pos[i, 1]
+                        struct_type[s] = 1
+                        struct_fuel[s] = 0.0
+                        struct_store[s] = 0.0
+                        struct_owner[s] = creature_id[i]
+                        struct_alive[s] = True
+                        struct_grid[cy, cx] = s
+                    du = d_w / house_wood_cost
+                    u = u + du
+                    if u > 1.0:
+                        u = np.float32(1.0)
+                    struct_store[s] = u
+                    inventory[i] = inventory[i] - d_w
+                    energy[i] = energy[i] - house_energy_cost * du
     return struct_free_count
 
 
@@ -783,15 +863,17 @@ def phase_diffuse_signal(world: World) -> None:
 
 def phase_decay_structures(world: World) -> None:
     cfg = world.config
-    if cfg.fire_fuel_decay <= 0.0:
+    if cfg.fire_fuel_decay <= 0.0 and cfg.house_rot_rate <= 0.0:
         return
     struct_free_count, _n_died = _decay_structures(
         world.struct_type,
         world.struct_fuel,
+        world.struct_store,
         world.struct_alive,
         world.struct_free_list,
         np.int32(world.struct_free_count),
         np.float32(cfg.fire_fuel_decay),
+        np.float32(cfg.house_rot_rate),
     )
     world.struct_free_count = int(struct_free_count)
 
@@ -804,6 +886,7 @@ def phase_age_and_metabolize(world: World) -> None:
         world.alive,
         world.vel,
         world.pos,
+        world.inventory,
         np.float32(cfg.metabolic_cost),
         np.float32(cfg.move_cost),
         world.terrain,
@@ -811,6 +894,8 @@ def phase_age_and_metabolize(world: World) -> None:
         np.float32(1.0 / world.cell_h),
         np.float32(cfg.water_move_cost),
         np.float32(cfg.senescence_rate),
+        np.float32(cfg.carry_weight),
+        np.float32(cfg.max_inventory),
     )
 
 
@@ -1049,6 +1134,10 @@ def phase_build(world: World) -> None:
             np.float32(cfg.house_wood_cost),
             np.float32(cfg.house_energy_cost),
             np.float32(cfg.fire_initial_fuel),
+            cfg.houses_enabled,
+            np.float32(cfg.house_fire_radius),
+            np.float32(cfg.width),
+            np.float32(cfg.height),
         )
     )
 
@@ -1344,6 +1433,7 @@ def phase_reproduce(world: World) -> None:
         np.float32(cfg.width),
         np.float32(cfg.height),
         np.float32(cfg.mate_range),
+        np.float32(cfg.birth_spread),
         np.int32(world.tick),
         np.int32(world.next_id),
         np.int32(world.genealogy_used),

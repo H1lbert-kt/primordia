@@ -24,8 +24,11 @@ from primordia.world import World
 
 
 def make_config(**overrides: object) -> Config:
-    # stage 18: the default world is priced out of houses (1e6); tests
-    # that build one pin an affordable house price explicitly here
+    # stage 22: houses are off in the default world; these tests study
+    # the structure mechanics, so they enable them and keep the old
+    # lump-looking totals (a full pack still finishes a house in one
+    # delivery — payment is incremental per delivery, not per house)
+    overrides.setdefault("houses_enabled", True)
     overrides.setdefault("house_energy_cost", 20.0)
     return replace(Config(), **overrides)
 
@@ -92,10 +95,14 @@ def test_civilization_config_validation() -> None:
         {"fire_energy_cost": -1.0},
         {"house_wood_cost": -1.0},
         {"house_energy_cost": -1.0},
-        # affordability: inventory is the only wood depot, so a price above
-        # the pack size is unbuildable (the stage-17 plan shipped 6/4)
-        {"house_wood_cost": 6.0},
-        {"fire_wood_cost": 5.0},
+        {"house_wood_cost": 0.0},  # stage 22: totals, but wood > 0
+        {"house_rot_rate": -0.1},
+        {"house_rot_rate": 1.0},
+        {"house_fire_radius": -1.0},
+        {"carry_weight": -1.0},
+        {"birth_spread": -1.0},
+        {"build_house_bias": 5.0},
+        {"fire_wood_cost": 5.0},  # the fire is still a lump: must fit the pack
         {"fire_initial_fuel": -1.0},
         {"fire_fuel_decay": -1.0},
         {"fire_radius": -1.0},
@@ -311,6 +318,7 @@ def test_heat_and_cover_stamp_within_radius() -> None:
     w.struct_alive[s_fire] = True
     w.struct_pos[s_house] = (10.0, 10.0)
     w.struct_type[s_house] = 1
+    w.struct_store[s_house] = 1.0  # finished house: full completeness
     w.struct_alive[s_house] = True
     w.rebuild_struct_fields()
 

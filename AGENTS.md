@@ -14,8 +14,72 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   README principal em **inglês**.
 
 ## Estado atual do repositório (verificado em 2026-10-12)
-- **Etapa 21 ("plasticidade/Oja — mente aberta, Baldwin") implementada,
-  commit pendente de aprovação:** plano em
+- **Etapa 22 ("casas incrementais") concluída, commit pendente de `/cp`:**
+  plano em `.opencode/plans/etapa-22-casas-incrementais.md`. **Núcleo:**
+  `struct_store` passa a guardar a completude `u∈[0,1]` das casas (fires
+  continuam com 0; **sem array novo → `FORMAT_VERSION` segue 10**).
+  `_build` (step.py) reescrito: fogo continua lump; casa é erguida em
+  **entregas** — `dW=min(inventário, madeira_falta)`, energia
+  `house_energy_cost·dW/wood_cost`, all-or-nothing **por entrega** (nunca
+  por casa); slot só materializa quando uma entrega paga (candidato
+  `s=-2`; `s=-1` = fogo dono da célula, **nenhuma entrega** — bug
+  pego pelo teste: `s >= -2` deixava `struct_store[-1]` ser escrito);
+  portão de fogo por entrega (fogo vivo a `house_fire_radius` —
+  **default 0 = sem portão**; 3.0 do plano é armadilha documentada em
+  `cell_size=5`: fogo dono da célula, próxima célula livre a 5.0).
+  `_decay_structures` ganha podridão `u -= house_rot_rate·(1−u)`, morte
+  em `u<=0` (casa completa imortal; fase só roda se `fire_fuel_decay>0`
+  **ou** `house_rot_rate>0`). `_stamp_structures` (world.py) escreve `u`
+  cru com max-merge (o shield é `cover_reduction·u` aplicado no bite —
+  inalterado). `_age_and_metabolize` ganha imposto de carga
+  `move·(1+carry_weight·inv/max_inv)`, guard `carry_weight>0` (0 =
+  drain bit-idêntico). Spawn: `build_house_bias` somado a
+  `genome[:, b2_off+7]` (b2[7] = logit build_house; sem RNG quando 0).
+  `_reproduce` (genome.py): `birth_spread` jittera o filho com wrap
+  (sem draw quando 0; precisa de width/height). **Config:** campos novos
+  `houses_enabled=False` (o preço 1e6 da etapa 18 morre — sem pagamento
+  único não existe trava), `house_rot_rate=0.01`, `house_fire_radius=0.0`,
+  `carry_weight=0.0`, `build_house_bias=0.0`, `birth_spread=0.0`;
+  `house_wood_cost`/`house_energy_cost` viram **totais** (4.0/3.0);
+  validações novas (wood>0, rot∈[0,1), radius/carry/spread≥0,
+  bias∈[−4,4]); removida a guarda "house≤max_inventory" (entrega
+  parcelada torna preço>pack legal); guarda do fogo (lump) permanece.
+  **Stats:** `house_progress` (média de u das casas vivas) e
+  `inventory_mean`. **Testes: 259 passed** — `tests/test_houses.py`
+  (23: disabled no-op, entrega fracionada, continuação, fogo vs casa,
+  portão de fogo, cover=u, podridão, casa completa imortal, bias
+  isolado, spread, carry ×3, conservação, determinismo, save/load,
+  validações), `test_civilization` ajustado (`houses_enabled=True` em
+  make_config, validação nova, pin de u no stamp); **fix real pego pelo
+  teste** (`s=-1` pagava entrega e escrevia `struct_store[-1]`).
+  **Bench** (load 2.7, 2 amostras): **846/530/203** a 500/2000/5000 —
+  piso 30 @N=2000 com 17×; `alive_final` **98/693/1166 idêntico bit-a-bit
+  ao clone do HEAD `755d763`** → default intocado (todos os knobs em
+  neutro; só muda o código, não o caminho default).
+  **Experimento `experiments/houses/`** (proto_culture + knobs
+  `carry=1.0, bias=−1.5, rot=0.01, fire_radius=6.0, spread=0`;
+  wood{2,4,8}×energy{1.5,3,6}×cover{0.3,0.5} + gêmeos no-effect
+  (cover=0) + controle off; seeds 42/7 × 3k, pré-registrado):
+  **NULO publicável** — 0/18 passam as 4 critérios. Controle off
+  214/189; melhor casa ~80 (0.3×ctrl). Adoção funciona (w2: 39–97
+  casas, u→1; w8: 0–2 — podridão/portão/carga não travam spam).
+  **Shelter corta bites de verdade** (w2_e3: 8→4→2 mortes em
+  c0/c0.3/c0.5; meat 123→74→57; payback ~0–1 ticks ≪ L/5=270) **mas o
+  dreno é reprodutivo** (nascimentos 287–410 → 69–153) e a pop fica em
+  ~0.3× do controle. Canto e barato `w2_e1.5` apaga a predação
+  (0 mortes — casa barata deleta a ameaça que existe para defender).
+  Gate **não rodou** (fixação pré-registrada: sem passante → sem gate).
+  `configs/houses.toml` (pins reach + knobs, radius 6.0 com nota),
+  README do experimento com 6 limitações (payback otimista — não cobra
+  o imposto de carga; L censurado a 3k; 2 seeds; trajetórias idênticas
+  entre covers = determinismo, não cache). README principal: roadmap
+  1–19+21+22, 259 testes, comando houses. **Fix de reprodutibilidade:**
+  `experiments/civilization/run.py` ganhou `houses_enabled=True` (sem
+  isso as variantes h20/h12/h8 virariam no-op silencioso com o default
+  novo) + postscript no README do experimento (npz cacheado = lump;
+  `--force` hoje mede a mecânica nova, não reproduz).
+- **Etapa 21 ("plasticidade/Oja — mente aberta, Baldwin") concluída e
+  commitada (`755d763`):** plano em
   `.opencode/plans/etapa-21-plasticidade.md` (5 ajustes do usuário:
   W_efetivo=W_genoma+ΔW com decai/clamp, genoma imutável na vida
   (dw separado, não herdado), sweep de η {0,1e-4,1e-3,1e-2}, η gene
@@ -1016,7 +1080,7 @@ Roadmap "mundo real" aprovado (`.opencode/plans/roadmap-mundo-real.md`):
 15 tag/cor ✓ → 16 doação + `experiments/proto_culture/` ✓ →
 17 civilização (madeira/fogo/casas) + `experiments/civilization/` ✓ →
 18 balanceamento dos defaults ✓ → 19 daemon+SQLite ✓ →
-20 território (pendente) → 21 plasticidade/Oja ✓ (implementada;
-default `gene` aguardando confirmação antes do commit).
+20 território (pendente) → 21 plasticidade/Oja ✓ →
+22 casas incrementais ✓ (nulo publicado, default off; commit pendente de `/cp`).
 
 Trabalhe **apenas na etapa que o usuário indicar**.

@@ -240,14 +240,17 @@ each); resuming from a checkpoint and continuing N ticks is
 
 Target: ≥ 30 ticks/s at 2000 creatures headless (i5-8265U, no GPU).
 
-| creatures | ticks/s (load 5–7, stage-18 defaults) |
+| creatures | ticks/s (load 2.7, stage-22 defaults) |
 |---|---|
-| 500 | 277–579 |
-| 2000 | 175–265 |
-| 5000 | 113–148 |
+| 500 | 617–846 |
+| 2000 | 168–530 |
+| 5000 | 104–203 |
 
 Numbers vary 2–4× between processes depending on machine load (this box runs
-a desktop session); compare A/B in the same session. Stage 17 added five
+a desktop session); compare A/B in the same session. Stage 22's rebuild
+(additive delivery logic, rot, the hauling tax) leaves the default world
+bit-identical — `alive_final` 98/693/1166 matches the stage-21 HEAD exactly
+— and the floor holds with 5× margin. Stage 17 added five
 phases (wood growth, structure decay, gather, build, structure rebuild)
 that together cost ~138 µs/tick ≈ **1.2%** of the tick at N=2000 (profile:
 11/4/33/44/47 µs) — the table's range is machine load, not the new phases,
@@ -279,6 +282,7 @@ python experiments/civilization/run.py --phase gate --house-energy 12
 python experiments/civilization/run.py --phase gate --house-energy 1000000  # control
 python experiments/plasticity/run.py --ticks 10000  # stage 21: Oja ablation (~15 min)
 python experiments/plasticity/run.py --phase clones
+python experiments/houses/run.py --phase pilot       # stage 22: incremental houses (null)
 
 # stats + plots
 python run.py --seed 42 --headless --ticks 5000 --stats s42.npz
@@ -310,7 +314,7 @@ primordia/
   step.py     stats.py   io.py       bench.py ecology.py
   database.py # stage-19 SQLite world store (daemon checkpoints + timeline)
   render/     # pygame viewer + headless GIF recorder (never imported by core)
-tests/        # 236 tests: determinism, invariants, save/load, guards
+tests/        # 259 tests: determinism, invariants, save/load, guards
 experiments/  # one script + README per experiment
 run.py        # CLI: --seed --headless --ticks --load --save --stats
               #      --config --record --screenshot --select
@@ -359,7 +363,17 @@ plasticity (stage 21: Oja's rule on a separate, decaying, energy-billed
 the control and η=1e-2 goes extinct; the evolvable gene's distribution
 sits *below* neutral drift in 3/3 seeds, i.e. the cost is selected
 against, not learning for — Config default off, gene pinned in
-`configs/proto_culture.toml`, in `experiments/plasticity/`). The "real world"
+`configs/proto_culture.toml`, in `experiments/plasticity/`), and the
+incremental house (stage 22: a house is now raised in wood deliveries
+with cover scaling by completeness, unfinished stubs rot, hauling wood
+is dearer than holding it, and each delivery wants a fire nearby — in
+the pre-registered sweep (`experiments/houses/`, wood×energy×cover plus
+per-cost no-effect twins) *no* price passes: shelter measurably cuts
+bites 8→2 at the same cost, and payback closes in ~1 tick, but the
+hauling and construction drain cuts births 287–410 → 69–153 and ends
+every variant at ~0.3× the control population, so the default stays
+`houses_enabled = false` and no gate ran — an honest null on housing,
+the second one, now with the mechanics redesigned). The "real world"
 roadmap continues with territory (stage 20, still pending — skipped
 ahead to Oja by choice). Known open
 problems are documented above (predation still a trickle, creatures still
