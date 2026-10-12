@@ -199,14 +199,25 @@ class Config:
     max_inventory: float = 4.0  # wood a creature can carry at once
 
     # structures (one per cell; a fire burns out without fuel, a house
-    # persists). Units: 1 wood = 1 fuel = 1 energy (calibrated in the
-    # stage-17 pilot; documented so the cook accounting reads honestly)
+    # persists). Units: 1 wood = 1 fuel = 1 energy (house price calibrated
+    # in the stage-17 pilot, fire price in the stage-18 default sweep;
+    # documented so the cook accounting reads honestly)
     fire_wood_cost: float = 3.0  # wood consumed to build or refuel a fire
-    fire_energy_cost: float = 10.0  # energy consumed to build a fire
+    # Stage-18 default sweep (seeds 42/7 x 5k, houses priced out): mean
+    # final pop 408 @5.0, 145 @10.0, 60 @20.0 — cheaper fires drain less
+    # per build while the cook bonus returns more, and the gate (3 seeds
+    # x 10k) ended 1163/1170/821 alive vs 3/86/70 at the old 10.0/20.0.
+    fire_energy_cost: float = 5.0  # energy consumed to build a fire
     # a house costs a full pack: the stage-17 plan shipped 6.0 against a
     # max_inventory of 4.0, which made houses unbuildable (validated below)
     house_wood_cost: float = 4.0
-    house_energy_cost: float = 20.0
+    # Prohibitive on purpose (stage 18): at 20.0 the default world built
+    # ~380 houses by 5k ticks and starved the population to 3 (3/86/70
+    # alive across seeds 42/7/13). No creature accumulates 1e6 (typical
+    # peak energy is ~100), and payment is all-or-nothing, so the default
+    # world never builds houses; experiments override this price, as the
+    # stage-17 pilot/gate already did (20/12/8).
+    house_energy_cost: float = 1_000_000.0
     fire_initial_fuel: float = 3.0  # fuel charged when a fire is built
     fire_fuel_decay: float = 0.002  # fuel burned per tick; fire dies at 0
     fire_radius: float = 6.0  # world units the heat reaches (cook + glow)

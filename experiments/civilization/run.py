@@ -14,6 +14,9 @@ guard), and at the default ``house_energy_cost=20.0`` seed 42 built 370
 houses in 3k ticks and collapsed (500 -> 37 alive, births 259 -> 26)
 while the same world with unbuildable houses recovered to 201. Houses
 drain the reproduction budget faster than any shelter return exists.
+(Stage 18 subsequently priced houses out of the *default* Config —
+1e6 — and swept the fire price; see the README's postscript. This
+pre-registration is unchanged: its overrides still apply.)
 
 Phases:
 

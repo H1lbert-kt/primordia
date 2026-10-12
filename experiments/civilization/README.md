@@ -134,3 +134,29 @@ python experiments/civilization/run.py --phase pilot            # 2 × 5k × 4
 python experiments/civilization/run.py --phase gate --house-energy 12
 python experiments/civilization/run.py --phase gate --house-energy 1000000  # control
 ```
+
+## Postscript (stage 18 — the defaults were never gated)
+
+The stage-17 experiment calibrated variants of `proto_culture.toml` but
+never the **default Config** the CLI ships, and the default was dying:
+`house_energy_cost=20` built ~380 houses by 5k and starved seeds
+42/7/13 down to **3/86/70** alive (524 famine deaths, 27 births on seed
+42 — the world you get from a bare `run.py --headless --ticks 5000`).
+Isolating the levers on the default (seed 42, 5k): no construction at
+all → 327 alive recovering; fires only → 195; fires + houses → 3. The
+documental `default + house=12` run also collapses (11 alive, 425
+houses) — houses fail on the default world at every price tested here,
+not just 20.
+
+Stage 18 fixed the defaults **without touching the tick**: houses are
+priced out of the default world (`house_energy_cost = 1e6`, experiments
+override as above) and the fire was swept in the pre-registered bracket
+`{5, 10, 20}` (seeds 42/7 × 5k, rule: highest mean final pop with
+`cooked > 0`) — **5 wins at 408 mean final vs 145 @10 and 60 @20**, even
+beating the build-free world, because a cheap build drains less than
+the cook bonus returns. Gate (3 seeds × 10k, `fire=5` + houses priced
+out): **1163 / 1170 / 821 alive, min alive 101/110/137 — hard gate
+PASS**, 2489–3054 births, 45k–94k cooked per run. The chosen price sits
+on the bracket's cheap boundary — if a future balance pass moves it
+down again, re-run this sweep first.
+

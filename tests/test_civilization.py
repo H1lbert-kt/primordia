@@ -24,6 +24,9 @@ from primordia.world import World
 
 
 def make_config(**overrides: object) -> Config:
+    # stage 18: the default world is priced out of houses (1e6); tests
+    # that build one pin an affordable house price explicitly here
+    overrides.setdefault("house_energy_cost", 20.0)
     return replace(Config(), **overrides)
 
 
@@ -195,11 +198,15 @@ def test_build_fire_pays_the_full_price() -> None:
     "inv,energy",
     [
         (2.9, 50.0),  # short of fire_wood_cost: no debt allowed
-        (3.0, 9.9),  # short of fire_energy_cost
+        (3.0, None),  # short of fire_energy_cost (resolved below)
     ],
 )
-def test_build_fire_requires_full_payment(inv: float, energy: float) -> None:
+def test_build_fire_requires_full_payment(
+    inv: float, energy: float | None
+) -> None:
     w, i, _j = placed()
+    if energy is None:
+        energy = float(w.config.fire_energy_cost) - 0.1
     w.inventory[i] = inv
     w.energy[i] = energy
     w.actions[i, 6] = 1.0

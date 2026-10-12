@@ -14,6 +14,38 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   README principal em **inglês**.
 
 ## Estado atual do repositório (verificado em 2026-10-12)
+- **Etapa 18 ("defaults que sobrevivem", emergência de balanceamento)
+  concluída, commit pendente de `/cp`:** plano em
+  `.opencode/plans/etapa-18-balanco-defaults.md` (decisões do usuário:
+  casa sai do default / próxima feature = etapa 19 daemon+SQLite).
+  **Problema medido:** a Config default da CLI morria — seeds 42/7/13 ×
+  5k terminavam com **3/86/70** vivos (fome 524, 27 nascimentos na 42,
+  `n_house`→383): `house_energy_cost=20` **nunca foi gate-ada** (a 17
+  calibrou só variações do `proto_culture.toml`). Isolamento seed42/5k:
+  sem construção 327 ✓ / só fogo 195 / fogo+casa 3; documental
+  `default+house=12` também colapsa (final 11, 425 casas).
+  **Mudanças (só Config, zero tick):** `house_energy_cost` 20→**1e6**
+  (proibitivo documentado; experimentos override — a 17 já fazia);
+  `fire_energy_cost` 10→**5** (sweep pré-registrado {5,10,20} × seeds
+  42/7 × 5k, regra = maior pop final média com cook>0: **408/145/60**;
+  fogo barato vence até o mundo sem construção — cook devolve mais do
+  que o build drena; **limite do bracket: 5 é o fim barato**, se
+  rebaixar de novo refazer o sweep). **Gate (candidato × 3 seeds ×
+  10k): PASS duro** — final **1163/1170/821**, min alive 101/110/137,
+  births 2489–3054, cooked 45k–94k, casas 0 (esperado). Candidato ==
+  default pós-edit (bit-idêntico, sem re-run). **Testes: 206 passed** —
+  fix: `make_config` do `tests/test_civilization.py` fixa
+  `house_energy_cost=20` (testes constroem casa com energia 60);
+  `test_build_fire_requires_full_payment` agora resolve o caso "curto
+  de energia" relativamente a `fire_energy_cost` (era pin 9.9 fixo).
+  **Bench** (2 amostras, load 5–7): **277–579 / 175–265 / 113–148** a
+  500/2000/5000, `alive_final` 109/662/1112 — piso 30 @N=2000 com
+  5–8× (era 92–136 na 17 sob load 7; tick intocado). Docs:
+  `experiments/civilization/README.md` ganhou **Postscript (stage 18)**
+  com todos os números; `run.py` do experimento ganhou nota de
+  rodapé (pré-registrado intacto); README principal bench 18 +
+  reprodutibilidade + roadmap 1–18. **Próximo passo do usuário:
+  `/cp`**, depois etapa 19 (daemon + SQLite).
 - **Etapa 17 ("civilização": madeira, fogo, casas) concluída, commit
   pendente de `/cp`:** plano em `.opencode/plans/etapa-17-civilizacao.md`
   (decisões do usuário: 2 gates separados `build_fire`/`build_house`,
@@ -888,7 +920,8 @@ Roadmap "mundo real" aprovado (`.opencode/plans/roadmap-mundo-real.md`):
 10 ambiente (terreno/estações/luz) ✓ → 11 biologia (sexualidade/senescência/carniça) ✓
 → 12 ecologia (ciclos tróficos) ✓ → 13 canal ✓ → 14 difusão ✓ →
 15 tag/cor ✓ → 16 doação + `experiments/proto_culture/` ✓ →
-17 civilização (madeira/fogo/casas) + `experiments/civilization/` ✓
-(próxima: daemon/território/Oja, a decidir com o usuário).
+17 civilização (madeira/fogo/casas) + `experiments/civilization/` ✓ →
+18 balanceamento dos defaults ✓ (próxima: daemon+SQLite → território →
+Oja, a decidir com o usuário).
 
 Trabalhe **apenas na etapa que o usuário indicar**.

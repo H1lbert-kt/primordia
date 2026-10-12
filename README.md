@@ -74,7 +74,9 @@ limitations in each experiment's README.
 > 16 opened a donation channel (a 5th brain output gifting energy to the
 > nearest neighbour, 9 hidden units, `FORMAT_VERSION 8`) and stage 17
 > added the civilization base (a wood-smell input and three outputs for
-> gather/build-fire/build-house, `FORMAT_VERSION 9`). The experiment
+> gather/build-fire/build-house, `FORMAT_VERSION 9`). Stage 18
+> recalibrated the *default* prices only (fire 10 → 5, houses priced
+> out of the default world at 1e6 — Config, no tick change). The experiment
 > scripts pin the old regime
 > off via `STAGE8_BASE` so the *regime* is preserved — but reruns on current
 > HEAD use the sexual dynamics; the original asexual runs stay in each
@@ -183,23 +185,24 @@ the whole scene dims with the day/night cycle shown as `light` in the HUD.
 
 Target: ≥ 30 ticks/s at 2000 creatures headless (i5-8265U, no GPU).
 
-| creatures | ticks/s (load 6.9–7.4, stage-17 default) |
+| creatures | ticks/s (load 5–7, stage-18 defaults) |
 |---|---|
-| 500 | 127–134 |
-| 2000 | 92–136 |
-| 5000 | 42–124 |
+| 500 | 277–579 |
+| 2000 | 175–265 |
+| 5000 | 113–148 |
 
 Numbers vary 2–4× between processes depending on machine load (this box runs
 a desktop session); compare A/B in the same session. Stage 17 added five
 phases (wood growth, structure decay, gather, build, structure rebuild)
 that together cost ~138 µs/tick ≈ **1.2%** of the tick at N=2000 (profile:
-11/4/33/44/47 µs) — the table's wide range is the machine's load 7, not the
-new phases, and the 30 ticks/s floor at N=2000 holds with 3–4.5× margin.
-Stage 16's donate phase (0.75 µs at default, ~24 µs when gifts are active)
-and earlier per-phase costs are listed in `AGENTS.md`. The stage-10 economy
-holds different populations than older tables during a 1000-tick bench
-(alive_final 82/480/853), so they are not directly comparable to earlier
-runs. `python -m primordia.bench [--profile]` reproduces the table.
+11/4/33/44/47 µs) — the table's range is machine load, not the new phases,
+and the 30 ticks/s floor at N=2000 holds with 5–8× margin (`alive_final`
+109/662/1112 under the stage-18 default prices). Stage 16's donate phase
+(0.75 µs at default, ~24 µs when gifts are active) and earlier per-phase
+costs are listed in `AGENTS.md`. The stage-10 economy holds different
+populations than older tables during a 1000-tick bench, so they are not
+directly comparable to earlier runs. `python -m primordia.bench [--profile]`
+reproduces the table.
 
 ## Reproduce everything
 
@@ -248,7 +251,7 @@ run.py        # CLI: --seed --headless --ticks --load --save --stats
 
 ## Roadmap status
 
-Stages 1–17 of the plan are implemented: world+food, brain+sensors,
+Stages 1–18 of the plan are implemented: world+food, brain+sensors,
 genome+reproduction, viewer, evolvable predation, stats/plots,
 save/load+genealogy, experiments/demo/publication, the guided-world stage
 (persistent food patches, richer senses, Elman recurrence, a richer
@@ -277,8 +280,12 @@ resource, campfires that cook, houses that shelter — in 10k
 while houses collapse it ~10× and extinct 1/3 of seeds even at half the
 price; selection does close the build spam, but only after the
 demographic damage — honest negative on housing, documented in the
-experiment's README). The "real world" roadmap continues with daemon /
-territory / Oja. Known open
+experiment's README), and the default-prices balance stage (stage 18:
+the CLI's default world was starving — houses at 20 collapsed it to 3
+alive at 5k — so houses are priced out of the default (1e6) and the
+fire swept 5/10/20; the new default ends 1163/1170/821 alive at 10k,
+Config-only, no tick change). The "real world" roadmap continues with
+daemon / territory / Oja. Known open
 problems are documented above (predation still a trickle, creatures still
 circle) rather than hidden.
 
