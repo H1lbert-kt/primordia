@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
+from typing import BinaryIO
 
 import numpy as np
 
@@ -117,8 +118,13 @@ _ARRAYS = (
 )
 
 
-def save_world(world: World, path: str) -> None:
-    """Write the full simulation state to ``path`` (npz, format v9)."""
+def save_world(world: World, path: str | BinaryIO) -> None:
+    """Write the full simulation state as npz (format v9).
+
+    ``path`` is a filesystem path or any binary file-like object (the
+    stage-19 daemon serializes checkpoints into a SQLite BLOB via
+    ``BytesIO``); both go through the same payload.
+    """
     payload: dict[str, np.ndarray] = {
         "format_version": np.int32(FORMAT_VERSION),
         "config_json": np.array(json.dumps(asdict(world.config), sort_keys=True)),
@@ -141,8 +147,11 @@ def save_world(world: World, path: str) -> None:
     np.savez(path, **payload)
 
 
-def load_world(path: str) -> World:
+def load_world(path: str | BinaryIO) -> World:
     """Rebuild a world saved by :func:`save_world`, RNG streams restored.
+
+    ``path`` is a filesystem path or a binary file-like object holding
+    the npz bytes (stage-19 database checkpoints).
 
     Raises ``ValueError`` on an unknown format version so old files fail
     with a clear message instead of a shape mismatch.

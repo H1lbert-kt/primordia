@@ -14,6 +14,45 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   README principal em **inglês**.
 
 ## Estado atual do repositório (verificado em 2026-10-12)
+- **Etapa 19 ("daemon contínuo + SQLite") concluída, commit pendente
+  de `/cp`:** plano em `.opencode/plans/etapa-19-daemon-sqlite.md`
+  (roadmap antiga etapa 11; **zero dependência nova** — sqlite3 stdlib,
+  WAL). **`primordia/database.py` (novo):** `open_db/init_db`
+  (`meta` key/value: schema_version=1, format_version, seed,
+  config_json, tick — idempotente, schema divergente → ValueError),
+  `save_checkpoint/load_checkpoint` (npz completo em BLOB via
+  `io.BytesIO`; versão divergente → ValueError "format"; vazio →
+  "no checkpoints"), `latest_tick`, `prune_checkpoints(keep)` (mantém
+  os K mais novos, retorna linhas apagadas), `timeline_row` (gauges
+  direto do World: tick/alive/births/deaths_*/mean_energy/n_fire/
+  n_house/wood_total — **sem StatsRecorder**, que cresce sem limite;
+  RNG nunca tocado) + `insert_timeline` batch e `timeline_rows`.
+  **`io.py`:** `save_world/load_world` aceitam `str | BinaryIO` (mesmo
+  payload; testado bit-a-bit vs caminho). **CLI (`run.py`):**
+  `--daemon` (headless implícito; sem `--ticks` = infinito; exige
+  `--db`; **não combina com `--stats`**); `--db PATH` (checkpoints +
+  timeline em runs normais headless; janela não checkpointa → erro);
+  `--load-db PATH` (retoma o último checkpoint; exclusivo com `--load`
+  e `--config`; janela = snapshot do último checkpoint — live-tail =
+  futuro); `--checkpoint-every 5000` / `--metrics-every 10` /
+  `--checkpoint-keep 5`; SIGINT/finally → checkpoint final; batch de
+  timeline a cada 100 linhas ou no checkpoint. **Testes: 220 passed**
+  (+`tests/test_database.py` 9: roundtrip bit-a-bit, meta idempotente,
+  prune, blob de versão velha forjado, db vazio, timeline coerente/
+  monotônica, WAL 2ª conexão + integrity_check, schema divergente;
+  `tests/test_daemon.py` 4: validações de CLI, **run 60 + resume 40
+  bit-idêntico vs run contínua 100 (subprocessos)**, daemon infinito +
+  SIGINT → resume, snapshot `--load-db --ticks 0`; `test_io` +1
+  file-like). **Evidência (120 s, avisada):** daemon seed 42 →
+  **23 570 ticks @197 t/s**, pop 227–1538 oscilando, 10 133 births,
+  DB **57,4 MB** com 10 checkpoints (~5,2 MB), timeline 471 linhas;
+  screenshot da janela via `--load-db` em tick 23530
+  (`/tmp/opencode/stage19_observe.png`). **Bench** (load 2,5):
+  **958/366/188** a 500/2000/5000, `alive_final` 109/662/1112 idêntico
+  (tick intocado). README principal: seção "The world that runs by
+  itself", layout com `database.py`, comandos, roadmap 1–19.
+  **Próximo passo do usuário: `/cp`**, depois etapa 20 (território e
+  conflito) — a decidir.
 - **Etapa 18 ("defaults que sobrevivem", emergência de balanceamento)
   concluída, commit pendente de `/cp`:** plano em
   `.opencode/plans/etapa-18-balanco-defaults.md` (decisões do usuário:
@@ -921,7 +960,7 @@ Roadmap "mundo real" aprovado (`.opencode/plans/roadmap-mundo-real.md`):
 → 12 ecologia (ciclos tróficos) ✓ → 13 canal ✓ → 14 difusão ✓ →
 15 tag/cor ✓ → 16 doação + `experiments/proto_culture/` ✓ →
 17 civilização (madeira/fogo/casas) + `experiments/civilization/` ✓ →
-18 balanceamento dos defaults ✓ (próxima: daemon+SQLite → território →
-Oja, a decidir com o usuário).
+18 balanceamento dos defaults ✓ → 19 daemon+SQLite ✓ (próxima:
+território → Oja, a decidir com o usuário).
 
 Trabalhe **apenas na etapa que o usuário indicar**.

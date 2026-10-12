@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from io import BytesIO
 from pathlib import Path
 
 import numpy as np
@@ -73,6 +74,28 @@ def test_roundtrip_immediate(tmp_path: Path) -> None:
     used = int(w.cell_offsets[-1])
     assert used == int(v.cell_offsets[-1])
     assert np.array_equal(w.cell_slots[:used], v.cell_slots[:used]), "cell_slots"
+
+
+def test_roundtrip_file_like_identical_to_path(tmp_path: Path) -> None:
+    # stage 19: the daemon serializes checkpoints into a SQLite BLOB, so
+    # save_world/load_world must accept a binary file-like object and
+    # produce the same state as the path-based form
+    cfg = Config(max_creatures=64, initial_creatures=32)
+    w = World(cfg, seed=13)
+    for _ in range(60):
+        advance(w)
+
+    buf = BytesIO()
+    save_world(w, buf)
+    from_buf = load_world(BytesIO(buf.getvalue()))
+
+    path = tmp_path / "same.npz"
+    save_world(w, str(path))
+    from_path = load_world(str(path))
+
+    assert_worlds_equal(w, from_buf)
+    assert_worlds_equal(from_buf, from_path)
+    assert from_buf.rng.bit_generator.state == w.rng.bit_generator.state
 
 
 def test_continuation_identical(tmp_path: Path) -> None:

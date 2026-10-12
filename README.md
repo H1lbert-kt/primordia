@@ -181,6 +181,19 @@ cause, and mean energy live (sparkline in overview mode). The world renders
 terrain under the food layer (blue lakes, shorelines, fertile ground) and
 the whole scene dims with the day/night cycle shown as `light` in the HUD.
 
+## The world that runs by itself
+
+`python run.py --daemon --db world.db` starts a world that never stops:
+headless, state checkpointed into a plain SQLite file (stdlib — no new
+dependency), timeline gauges every 10 ticks, Ctrl-C writes a final
+checkpoint. Open the newest snapshot any time with
+`python run.py --load-db world.db`, or resume where it left off with
+`python run.py --load-db world.db --headless --ticks 500`. A 120-second
+run on this box covered 23 570 ticks (population swinging 227–1538,
+10 133 births) in a 57 MB database holding 10 kept checkpoints (~5.2 MB
+each); resuming from a checkpoint and continuing N ticks is
+**bit-identical** to a continuous run, exactly like `--save`/`--load`.
+
 ## Performance
 
 Target: ≥ 30 ticks/s at 2000 creatures headless (i5-8265U, no GPU).
@@ -227,6 +240,11 @@ python plot.py s42.npz --out figs/
 python run.py --seed 42 --headless --ticks 5000 --save w5k.npz
 python run.py --load w5k.npz --headless --ticks 500
 
+# the world that runs by itself (stage 19: SQLite daemon)
+python run.py --daemon --db world.db              # until Ctrl-C
+python run.py --load-db world.db                  # observe the snapshot
+python run.py --load-db world.db --headless --ticks 500 --save cont.npz
+
 # demo GIF (what you see at the top of this README)
 python run.py --seed 42 --headless --ticks 9000 \
     --record docs --record-every 360
@@ -240,10 +258,11 @@ python run.py --headless --ticks 1000 --config overrides.example.json
 
 ```
 primordia/
-  config.py   world.py   genome.py   brain.py   sensors.py
-  step.py     stats.py   io.py       bench.py   ecology.py
+  config.py world.py genome.py brain.py sensors.py
+  step.py     stats.py   io.py       bench.py ecology.py
+  database.py # stage-19 SQLite world store (daemon checkpoints + timeline)
   render/     # pygame viewer + headless GIF recorder (never imported by core)
-tests/        # 206 tests: determinism, invariants, save/load, guards
+tests/        # 220 tests: determinism, invariants, save/load, guards
 experiments/  # one script + README per experiment
 run.py        # CLI: --seed --headless --ticks --load --save --stats
               #      --config --record --screenshot --select
@@ -251,7 +270,7 @@ run.py        # CLI: --seed --headless --ticks --load --save --stats
 
 ## Roadmap status
 
-Stages 1–18 of the plan are implemented: world+food, brain+sensors,
+Stages 1–19 of the plan are implemented: world+food, brain+sensors,
 genome+reproduction, viewer, evolvable predation, stats/plots,
 save/load+genealogy, experiments/demo/publication, the guided-world stage
 (persistent food patches, richer senses, Elman recurrence, a richer
@@ -284,8 +303,10 @@ experiment's README), and the default-prices balance stage (stage 18:
 the CLI's default world was starving — houses at 20 collapsed it to 3
 alive at 5k — so houses are priced out of the default (1e6) and the
 fire swept 5/10/20; the new default ends 1163/1170/821 alive at 10k,
-Config-only, no tick change). The "real world" roadmap continues with
-daemon / territory / Oja. Known open
+Config-only, no tick change), and the daemon (stage 19: a world that
+runs by itself — SQLite checkpoints + timeline via stdlib, resume
+bit-identical, the window opens the newest snapshot). The "real world"
+roadmap continues with territory / Oja. Known open
 problems are documented above (predation still a trickle, creatures still
 circle) rather than hidden.
 
