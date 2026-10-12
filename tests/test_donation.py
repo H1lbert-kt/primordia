@@ -28,7 +28,7 @@ def layout_pins() -> None:
     assert cfg.sensor_input_dim == 35
     assert cfg.hidden_size == 9
     assert cfg.brain_params == 485  # 9*36 + 8*10 + 9*9 (W1, W2, W_rec)
-    assert cfg.genome_size == 490
+    assert cfg.genome_size == 491  # + plasticity eta trait (stage 21)
     assert 100 <= cfg.brain_params <= 500
 
 
@@ -149,7 +149,7 @@ def test_donate_phase_sits_between_emit_and_eat() -> None:
     names = [name for name, _ in step.PHASES]
     assert names.index("donate") == names.index("emit_signal") + 1
     assert names.index("donate") < names.index("eat")
-    assert len(names) == 21  # stage 17 added grow_wood/decay_structures/…
+    assert len(names) == 22  # stage 21 inserted plasticity after think
     # stage 17 contract: gather -> build -> rebuild -> eat (a fire built
     # this tick already cooks this tick; the rebuild sits between them)
     assert names.index("gather") == names.index("donate") + 1

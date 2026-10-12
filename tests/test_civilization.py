@@ -66,10 +66,10 @@ def test_layout_pins() -> None:
     assert cfg.sensor_input_dim == 35  # stage 17 added `smell wood` at 3n+13
     assert cfg.hidden_size == 9
     assert cfg.brain_params == 485  # 9*36 + 8*10 + 9*9 (W1, W2, W_rec)
-    assert cfg.genome_size == 490
+    assert cfg.genome_size == 491  # + plasticity eta trait (stage 21)
     assert 100 <= cfg.brain_params <= 500
     names = [name for name, _ in step.PHASES]
-    assert len(names) == 21
+    assert len(names) == 22
     assert names.index("grow_wood") == names.index("grow_food") + 1
     assert names.index("decay_structures") == names.index("diffuse_signal") + 1
     # gather -> build -> rebuild -> eat: a fire built this tick cooks now

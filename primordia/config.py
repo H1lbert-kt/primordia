@@ -20,7 +20,8 @@ class Config:
 
     N_OUTPUTS: ClassVar[int] = 8  # accel, turn, eat, emit, donate, gather,
     # build_fire, build_house (stage 17 added outputs 5-7)
-    N_BODY_TRAITS: ClassVar[int] = 5  # max_speed, size, vision_range, diet, tag_hue
+    N_BODY_TRAITS: ClassVar[int] = 6  # max_speed, size, vision_range, diet,
+    # tag_hue, plasticity_eta (stage 21: evolvable learning rate)
 
     # --- world geometry ---
     width: float = 1000.0
@@ -240,6 +241,51 @@ class Config:
     # so K tracks the outliers, not a transitive chain.
     species_threshold: float = 10.0
 
+    # --- synaptic plasticity (stage 21: local Oja, no reward, Baldwin) ---
+    # Weights never mutate inside a life: the rule writes only into the
+    # scratch ``dw``, zeroed at birth and NOT inherited, so genome_dist and
+    # the speciation metrics keep measuring heritable divergence alone
+    # (Lamarck inheritance would blur them; it stays a future opt-in flag).
+    # Effective synapses are W_eff = genome + dw; an explicit decay pulls dw
+    # back to 0 and a clamp bounds |dw|, so evolved weights are never erased.
+    # The Oja term -h^2 * W_eff only acts while the postsynaptic neuron is
+    # active (h ~ 0 => step ~ 0) — it is not idle-synapse atrophy.
+    # mode: "off" (no plasticity, forward skips dw -> bit-identical to the
+    # pre-stage-21 baseline), "fixed" (rate below), "gene" (per-creature eta
+    # read from the last body trait, spawned at 0 — selection decides
+    # whether to pay plasticity_cost to turn learning on).
+    # Lifetime plasticity (stage 21). Default "off": the pre-stage-21 world
+    # is the baseline old experiments were measured on; "gene" (the
+    # evolvable eta) is pinned in configs/proto_culture.toml.
+    plasticity_mode: str = "off"
+    # Fixed-mode learning rate; experiments sweep {0, 1e-4, 1e-3, 1e-2}
+    # instead of trusting a single default (stage-21 decision).
+    plasticity_rate: float = 0.0
+    plasticity_interval: int = 10  # apply every K ticks (>= 1)
+    plasticity_clip: float = 5.0  # max |dw| per synapse (10 sigma of init)
+    # Mutation scale of the evolvable eta gene. Its own parameter on
+    # purpose: trait_std (0.10) would jump eta straight to ~0.1, ten times
+    # the top of the viable sweep, and selection would purge the gene
+    # before it ever explored {1e-4..1e-2} (stage-21 pilot: every alive
+    # creature sat at eta=0 after 5k ticks). 0.01 centers mutations on the
+    # sweep band so "does selection turn learning on?" is measurable.
+    plasticity_eta_std: float = 0.01
+    # Memory fades back to the blueprint when not reinforced: dw decays by
+    # this fraction at every application (0 = only Oja's own term acts).
+    plasticity_decay: float = 0.01
+    # Energy drained per unit of |dw| moved in one application. The price
+    # makes learning a real trade-off for the evolvable-eta experiment:
+    # a gene that learns must earn its keep in survival, not for free.
+    # 1.0 x typical |dw| move (~0.4 at eta=1e-2) ~ half the per-tick
+    # metabolic bill amortized over plasticity_interval; calibrate in pilot.
+    plasticity_cost: float = 1.0
+    # Ablation (stage 21, default off): scale eta by the creature's own
+    # energy change since the last tick, 1 + strength * tanh(dE). This is
+    # LOCAL CREDIT ASSIGNMENT — the first signal in the sim that modulates
+    # learning by payoff; kept off by default and declared as such.
+    plasticity_credit: bool = False
+    plasticity_credit_strength: float = 1.0
+
     def __post_init__(self) -> None:
         if self.width <= 0.0 or self.height <= 0.0:
             raise ValueError("world dimensions must be positive")
@@ -367,6 +413,28 @@ class Config:
             raise ValueError("species_threshold must be positive")
         if self.genealogy_capacity < 0:
             raise ValueError("genealogy_capacity must be >= 0")
+        if self.plasticity_mode not in ("off", "fixed", "gene"):
+            raise ValueError("plasticity_mode must be 'off', 'fixed' or 'gene'")
+        if self.plasticity_rate < 0.0:
+            raise ValueError("plasticity_rate must be >= 0")
+        if self.plasticity_rate > 0.0 and self.plasticity_mode != "fixed":
+            raise ValueError(
+                "plasticity_rate > 0 only applies to plasticity_mode='fixed'"
+                " ('off' must stay a free control and 'gene' reads the"
+                " per-creature eta trait)"
+            )
+        if self.plasticity_interval < 1:
+            raise ValueError("plasticity_interval must be >= 1")
+        if self.plasticity_clip <= 0.0:
+            raise ValueError("plasticity_clip must be positive")
+        if not 0.0 <= self.plasticity_decay < 1.0:
+            raise ValueError("plasticity_decay must be in [0, 1)")
+        if self.plasticity_cost < 0.0:
+            raise ValueError("plasticity_cost must be >= 0")
+        if self.plasticity_eta_std < 0.0:
+            raise ValueError("plasticity_eta_std must be >= 0")
+        if self.plasticity_credit_strength < 0.0:
+            raise ValueError("plasticity_credit_strength must be >= 0")
 
     @property
     def grid_shape(self) -> tuple[int, int]:
@@ -402,6 +470,32 @@ class Config:
     def genome_size(self) -> int:
         """Exact genome rows: brain parameters followed by body traits."""
         return self.brain_params + self.N_BODY_TRAITS
+
+    @property
+    def plastic_params(self) -> int:
+        """Synapses plastic under Oja (stage 21): W1 (hid, in) plus
+        W_rec (hid, hid). The dw scratch has exactly this many columns."""
+        return (
+            self.hidden_size * self.sensor_input_dim
+            + self.hidden_size * self.hidden_size
+        )
+
+    @property
+    def plasticity_gene_offset(self) -> int:
+        """Genome column of the evolvable eta trait (always the last trait)."""
+        return self.brain_params + self.N_BODY_TRAITS - 1
+
+    @property
+    def plasticity_active(self) -> bool:
+        """True when some creature can write ``dw`` during this run.
+
+        ``mode='off'`` and ``mode='fixed'`` with rate 0 both keep ``dw``
+        permanently zero, so the forward skips it entirely and the run is
+        bit-identical to the pre-stage-21 baseline (the sweep's eta=0 arm).
+        """
+        return self.plasticity_mode == "gene" or (
+            self.plasticity_mode == "fixed" and self.plasticity_rate > 0.0
+        )
 
 
 def load_config(path: str, base: Config | None = None) -> Config:

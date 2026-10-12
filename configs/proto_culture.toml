@@ -19,7 +19,18 @@
 # donation treatment (donate_rate) is not set here: it is the experiment's
 # variant axis (experiments/proto_culture), and its Config default is 0.
 #
+# Stage 21 note: lifetime plasticity is off in Config defaults (the
+# default world is the baseline every older experiment measured against).
+# This file pins the evolvable eta gene ON — the same world where being
+# bitten is a real risk also learns within a life. cost=1.0 and
+# eta_std=0.01 are the prices the stage-21 gate was measured at
+# (experiments/plasticity); they are pinned here so the context world
+# stays self-documenting even if a default moves later.
+#
 # Usage:  python run.py --config configs/proto_culture.toml ...
 bite_rate = 12.0
 contact_range = 2.5
 signal_emit_cost = 0.05
+plasticity_mode = "gene"
+plasticity_cost = 1.0
+plasticity_eta_std = 0.01

@@ -1,6 +1,6 @@
 """Save and load the entire world as a versioned ``.npz`` (stage 7).
 
-Format v9 stores exactly what is needed to continue a run bit-for bit
+Format v10 stores exactly what is needed to continue a run bit-for bit
 (v2 added ``food_field`` and ``hidden_prev``; v3 adds ``terrain``, the
 stage-10 geography; v4 adds ``meat`` and ``meat_eaten``, the stage-11
 carrion cycle; v5 widens the genealogy log to 4 columns so both parents
@@ -11,7 +11,11 @@ bump — the stage-15 tag adds a body trait; v8 adds the stage-16
 field, ``inventory``, the structure SoA (positions, types, fuel, store,
 owner, alive mask and free-list) plus the ``wood_gathered`` /
 ``energy_cooked`` counters, and the genome grows to 490 columns with the
-8-output layout; readers reject older versions with a clear message):
+8-output layout; v10 is a layout bump for stage-21 plasticity — the genome
+grows to 491 columns with the evolvable-eta trait, ``dw`` (the Oja delta,
+never inherited but required to continue learning bit-for bit) and
+``e_last_plastic`` (the delta-E credit signal) join the payload; readers
+reject older versions with a clear message):
 
     format_version  int32 scalar; readers reject other versions
     config_json     Config as JSON (rebuilds every balance parameter)
@@ -30,7 +34,7 @@ owner, alive mask and free-list) plus the ``wood_gathered`` /
     pos vel angle energy age genome species_id parent_id creature_id
     alive free_list inventory food food_field terrain meat signal wood
     struct_pos struct_type struct_fuel struct_store struct_owner
-    struct_alive struct_free_list hidden_prev
+    struct_alive struct_free_list hidden_prev dw e_last_plastic
                     the SoA state arrays
     genealogy       (used, 4) int32 birth log, trimmed to genealogy_used
 
@@ -39,7 +43,7 @@ of ``tick`` (see ``cycles.py``), which is saved — so a restored world
 resumes mid-cycle with the exact same phase.
 
 Deliberately **not** stored: ``sensor_buf``/``hidden_buf``/``actions``
-(rewritten by phases 8–10 of every tick — ``hidden_prev`` *is* stored: it is
+(rewritten by phases 8, 9 and 11 of every tick — ``hidden_prev`` *is* stored: it is
 persistent Elman state), ``cell_*`` grids (rebuilt as phase
 0 of every ``advance``, and again by ``load_world`` so grids are valid even
 before the first tick), the stage-17 structure scratch
@@ -66,7 +70,7 @@ from .config import Config
 from .genome import get_numba_rng_state, set_numba_rng_state
 from .world import World
 
-FORMAT_VERSION = 9
+FORMAT_VERSION = 10
 
 _INT_SCALARS = (
     "seed",
@@ -115,11 +119,13 @@ _ARRAYS = (
     "struct_alive",
     "struct_free_list",
     "hidden_prev",
+    "dw",
+    "e_last_plastic",
 )
 
 
 def save_world(world: World, path: str | BinaryIO) -> None:
-    """Write the full simulation state as npz (format v9).
+    """Write the full simulation state as npz (format v10).
 
     ``path`` is a filesystem path or any binary file-like object (the
     stage-19 daemon serializes checkpoints into a SQLite BLOB via

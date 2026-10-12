@@ -15,14 +15,26 @@ Mutation policy (per gene, probability ``Config.mutation_rate``):
     max_speed, size, vision_range   multiplicative  * exp(N(0, trait_std))
     diet [brain_params+3]           additive   + N(0, trait_std), clamped
     tag_hue [brain_params+4]        circular   + N(0, trait_std) mod 1
+    plasticity_eta [brain_params+5] additive   + N(0, plasticity_eta_std),
+                                           clamped to [0, MAX_ETA] (stage 21)
 Diet is additive because it starts at 0 (herbivore) and a multiplicative
 mutation could never make it leave zero. Hue is circular: it identifies a
 lineage in [0, 1) and a multiplicative mutation would drag every colour
-towards 0, so the noise is added and wrapped instead. After mutation,
-traits are clamped to physically valid ranges (``max_dim`` caps speed and
-vision: on a torus, sensing or moving farther than the world itself is
-redundant, and the cap bounds ray sampling cost; ``max_size`` caps contact
-reach so neighbour scans stay bounded).
+towards 0, so the noise is added and wrapped instead. Eta is additive for
+the same reason diet is (it also starts at 0) and clamped at MAX_ETA —
+a numerical guard so a mutated learning rate cannot overflow the Oja step,
+not a balance knob (balance lives in ``Config.plasticity_cost``). Its
+mutation scale is ``Config.plasticity_eta_std`` rather than ``trait_std``:
+the viable sweep band is 1e-4..1e-2 and a 0.10 jump got the gene purged
+before selection ever saw a usable rate (stage-21 pilot). After
+mutation, traits are clamped to physically valid ranges (``max_dim`` caps
+speed and vision: on a torus, sensing or moving farther than the world
+itself is redundant, and the cap bounds ray sampling cost; ``max_size`` caps
+contact reach so neighbour scans stay bounded).
+
+The child is also born with an empty learned delta (``dw`` row = 0): plastic
+weights are stage-21 lifetime state, never inherited (Baldwin, not
+Lamarck), so genome distance keeps measuring heritable divergence alone.
 
 Determinism: the serial kernel draws from the Numba RNG, which is a global
 stream seeded once at ``World`` construction (``seed_numba_rng``). Because the
@@ -42,6 +54,12 @@ from numba import _helperlib, njit
 # Numerical floor keeping positive traits strictly positive; not a balance
 # parameter (mutation magnitudes never approach it with valid Config values).
 TRAIT_EPS = 1e-4
+
+# Upper clamp on the evolvable plasticity eta (stage 21): a learning rate
+# above 1 would push the Oja step out of float32 range for any bounded
+# input; not a balance parameter (the price of learning is
+# Config.plasticity_cost, and the sweep lives at 1e-4..1e-2).
+MAX_ETA = 1.0
 
 
 @njit(cache=True)
@@ -80,6 +98,9 @@ def _reproduce(
     alive: np.ndarray,
     genome: np.ndarray,
     hidden_prev: np.ndarray,
+    inventory: np.ndarray,
+    dw: np.ndarray,
+    e_last_plastic: np.ndarray,
     species_id: np.ndarray,
     parent_id: np.ndarray,
     creature_id: np.ndarray,
@@ -93,6 +114,7 @@ def _reproduce(
     mutation_rate: np.float32,
     mutation_std: np.float32,
     trait_std: np.float32,
+    eta_std: np.float32,
     traits_off: np.int32,
     max_dim: np.float32,
     max_size: np.float32,
@@ -221,6 +243,13 @@ def _reproduce(
                 genome[child, g] = genome[j, g]
         for h in range(hidden_prev.shape[1]):
             hidden_prev[child, h] = 0.0  # the child starts with no memory
+        # Wood and learned weights are never inherited: a recycled slot's
+        # inventory must not leak into the newborn, and stage-21 dw is
+        # lifetime state (Baldwin — crossover passes the blueprint only).
+        inventory[child] = 0.0
+        for k in range(dw.shape[1]):
+            dw[child, k] = 0.0
+        e_last_plastic[child] = child_e  # credit signal starts at birth energy
 
         for g in range(traits_off):
             if np.random.random() < mutation_rate:
@@ -265,6 +294,17 @@ def _reproduce(
         if np.random.random() < mutation_rate:
             h = genome[child, t + 4] + np.random.normal(0.0, trait_std)
             genome[child, t + 4] = h - np.floor(h)
+        # plasticity eta (stage 21): additive like diet — it also starts at
+        # 0 and a multiplicative mutation could never switch learning on.
+        # Its own std (Config.plasticity_eta_std): trait_std would jump eta
+        # an order of magnitude above the viable sweep band.
+        if np.random.random() < mutation_rate:
+            e = genome[child, t + 5] + np.random.normal(0.0, eta_std)
+            if e < 0.0:
+                e = 0.0
+            if e > MAX_ETA:
+                e = MAX_ETA
+            genome[child, t + 5] = e
 
         # Child state: born in place, initiator tracked for the lineage.
         pos[child, 0] = pos[i, 0]

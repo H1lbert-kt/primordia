@@ -29,6 +29,8 @@ STATE_ARRAYS = (
     "inventory", "wood", "wood_field", "struct_pos", "struct_type",
     "struct_fuel", "struct_store", "struct_owner", "struct_alive",
     "struct_free_list",
+    # stage 21: the Oja delta and the credit signal continue a plastic run
+    "dw", "e_last_plastic",
 )
 COUNTERS = (
     "tick", "births", "deaths_famine", "deaths_age", "deaths_predation",
@@ -213,6 +215,15 @@ def test_v8_save_is_rejected_clearly(tmp_path: Path) -> None:
     structure arrays; the gate must reject before the shape mismatch."""
     path = tmp_path / "old.npz"
     np.savez(path, format_version=np.int32(8))
+    with pytest.raises(ValueError, match="format"):
+        load_world(str(path))
+
+
+def test_v9_save_is_rejected_clearly(tmp_path: Path) -> None:
+    """Pre-stage-21 saves have a 490-column genome and no dw /
+    e_last_plastic arrays; the gate must reject before the shape mismatch."""
+    path = tmp_path / "old.npz"
+    np.savez(path, format_version=np.int32(9))
     with pytest.raises(ValueError, match="format"):
         load_world(str(path))
 

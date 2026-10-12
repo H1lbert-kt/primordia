@@ -14,8 +14,63 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   README principal em **inglês**.
 
 ## Estado atual do repositório (verificado em 2026-10-12)
-- **Etapa 19 ("daemon contínuo + SQLite") concluída, commit pendente
-  de `/cp`:** plano em `.opencode/plans/etapa-19-daemon-sqlite.md`
+- **Etapa 21 ("plasticidade/Oja — mente aberta, Baldwin") implementada,
+  commit pendente de aprovação:** plano em
+  `.opencode/plans/etapa-21-plasticidade.md` (5 ajustes do usuário:
+  W_efetivo=W_genoma+ΔW com decai/clamp, genoma imutável na vida
+  (dw separado, não herdado), sweep de η {0,1e-4,1e-3,1e-2}, η gene
+  evolvível com custo ∝|ΔW|, ablações off/Oja puro/Oja+ΔE; H1–H3
+  pré-registradas). **Núcleo:** `dw (N,396)` + `e_last_plastic (N,)`
+  (scratch, init 0/energia inicial), fase `phase_plasticity` após
+  think (22 fases — commit de hidden_prev saiu do think; Oja usa h
+  pré-commit em W_rec), kernel `brain.plasticity` (Oja em W1/W_rec via
+  W_eff=genome+dw, decay `plasticity_decay`, clamp `plasticity_clip`,
+  custo `plasticity_cost·Σ|Δdw|` debitado no mesmo tick, crédito ΔE
+  opcional `plasticity_credit` — reward-like, default off). **Config:**
+  `plasticity_mode` **default "off"** (decisão do usuário pós-gate: o
+  default é a linha de base dos experimentos antigos; **`gene` pinado
+  em `configs/proto_culture.toml`** com `cost=1.0` e `eta_std=0.01`
+  mantidos), "fixed" / "off", `rate` (só fixed;
+  validação nova: rate>0 fora de fixed → ValueError), `interval=10`,
+  `clip=5.0`, `decay=0.01`, `cost=1.0`, `eta_std=0.01` (**desvio
+  documentado**: trait_std=0.10 purgava η 100% no piloto — 0/442,
+  0/380; 0.001 mantém η vivo), `credit=False`, `credit_strength=1.0`.
+  **6º traço de corpo η** (nascce 0, mutação aditiva clamped
+  [0,MAX_ETA=1.0], std próprio, nunca herdado → genome_dist intacto).
+  **`FORMAT_VERSION` 9→10** (`dw`,`e_last_plastic`). Layout: genoma
+  **491** = 485 brain params + 6 traços (W1 315 + b1 9 + W2 72 + b2 8 +
+  W_rec 81 = 485; os 396 plásticos = W1+W_rec; W2+bias nunca plásticos;
+  34 inputs). **Fix drive-by etapa 17:**
+  `inventory[child]=0.0` (filho herdava madeira de slot reciclado).
+  `think` ganhou `use_dw` (off = pass bit-idêntico ao baseline).
+  **Testes: 236 passed** (14 novos `tests/test_plasticity.py`: fase,
+  bit-identidade, clones dw≠genoma, bounded/NaN, determinismo, custo,
+  gene dorme/acorda, η clamp/herança/std próprio, crédito, save/load
+  v10 contínuo, validação rate×mode; pins atualizados 491/22 fases).
+  **Bench** (A/B alternado, load 7): off 301/259 vs gene 285/253 t/s
+  @N=2000 → custo 2–5%, fase 130 µs ≈4%, piso 30 ✓.
+  **`experiments/plasticity/`** (6 variantes × seeds 42/7/13 × 10k,
+  pré-registrado; clones 2k): **GATE como registrado = FAIL**
+  (`oja1e-2` extinto 3/3 @ticks 4999/5351/4999 — janela viável
+  η≤1e-3 sob cost 1.0); sub-gate do default `gene` = PASS
+  (1141/1265/1461, min 96–122, |dw|≤2.0, η>0 em 0.61–0.75% dos vivos
+  vs deriva neutra 5.4–14.1%). **Critério de seleção do usuário
+  (η médio vs deriva em 3/3): rodado — FALHA como seleção a favor:**
+  η̄ do gene está ABAIXO do controle em todas as seeds (final
+  2–5e-5 vs 4–10e-4, η_max 0.008–0.017 vs 0.018–0.028) = seleção
+  **negativa** (custo suprime), sobreviventes com η = balanço
+  mutação×seleção. **H1 ✓** (oja1e-4/3 832–1155 vs
+  controle 1053–1531, nascimentos menores), **H2 ✓** (seleção suprime
+  η vs deriva mas não purga — polimorfismo raro), **H3 ✓** (oja_de
+  65/868/466, seed42 min 17 — crédito ΔE destabiliza). **Clones:**
+  genoma 0.000000 / dw 0.5465 / off 0.000000. README principal: seção
+  "What I discovered" nº 5 (com a ressalva: off é bit-idêntico dentro
+  da versão nova, mas genoma 490→491 muda o stream do Numba → números
+  antigos podem mudar em rerun), bench 21, roadmap 1–19+21, 236
+  testes. **Preço fixo 1.0 em tudo** — sensibilidade de preço =
+  experimento futuro separado. Etapa 20 (território) segue pendente.
+- **Etapa 19 ("daemon contínuo + SQLite") concluída, commitada e
+  pushada (`4eb24e8`):** plano em `.opencode/plans/etapa-19-daemon-sqlite.md`
   (roadmap antiga etapa 11; **zero dependência nova** — sqlite3 stdlib,
   WAL). **`primordia/database.py` (novo):** `open_db/init_db`
   (`meta` key/value: schema_version=1, format_version, seed,
@@ -960,7 +1015,8 @@ Roadmap "mundo real" aprovado (`.opencode/plans/roadmap-mundo-real.md`):
 → 12 ecologia (ciclos tróficos) ✓ → 13 canal ✓ → 14 difusão ✓ →
 15 tag/cor ✓ → 16 doação + `experiments/proto_culture/` ✓ →
 17 civilização (madeira/fogo/casas) + `experiments/civilization/` ✓ →
-18 balanceamento dos defaults ✓ → 19 daemon+SQLite ✓ (próxima:
-território → Oja, a decidir com o usuário).
+18 balanceamento dos defaults ✓ → 19 daemon+SQLite ✓ →
+20 território (pendente) → 21 plasticidade/Oja ✓ (implementada;
+default `gene` aguardando confirmação antes do commit).
 
 Trabalhe **apenas na etapa que o usuário indicar**.

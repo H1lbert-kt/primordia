@@ -9,5 +9,8 @@
   "mate_range": 5.0,
   "senescence_rate": 0.0003,
   "carrion_yield": 0.5,
-  "meat_decay": 0.01
+  "meat_decay": 0.01,
+  "plasticity_mode": "fixed",
+  "plasticity_rate": 0.001,
+  "plasticity_cost": 1.0
 }

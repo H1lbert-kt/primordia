@@ -34,7 +34,9 @@ def test_genome_layout() -> None:
     assert cfg.hidden_size == 9
     assert cfg.brain_params == 485  # 9*36 + 8*10 + 9*9 (W1, W2, W_rec)
     assert 100 <= cfg.brain_params <= 500
-    assert cfg.genome_size == cfg.brain_params + Config.N_BODY_TRAITS == 490
+    # 6 body traits since stage 21: + plasticity eta
+    assert cfg.genome_size == cfg.brain_params + Config.N_BODY_TRAITS == 491
+    assert cfg.plastic_params == 9 * 35 + 9 * 9  # W1 + W_rec blocks of dw
 
     _w1, _b1, _w2, b2, wrec = offsets(cfg)
     assert b2 + Config.N_OUTPUTS == wrec
@@ -45,11 +47,17 @@ def test_genome_layout() -> None:
     assert w.sensor_buf.shape == (cfg.max_creatures, cfg.sensor_input_dim)
     assert w.hidden_buf.shape == (cfg.max_creatures, cfg.hidden_size)
     assert w.hidden_prev.shape == (cfg.max_creatures, cfg.hidden_size)
+    assert w.dw.shape == (cfg.max_creatures, cfg.plastic_params)
+    assert w.e_last_plastic.shape == (cfg.max_creatures,)
     assert w.actions.shape == (cfg.max_creatures, Config.N_OUTPUTS)
     # body traits are filled from Config at spawn
     t = cfg.brain_params
     assert np.all(w.genome[w.alive, t] == np.float32(cfg.max_speed))
     assert np.all(w.genome[w.alive, t + 2] == np.float32(cfg.vision_range))
+    # stage 21: born unlearned, with an empty learned delta
+    assert np.all(w.genome[w.alive, t + 5] == 0.0)
+    assert np.all(w.dw == 0.0)
+    assert np.all(w.e_last_plastic[w.alive] == np.float32(cfg.initial_energy))
 
 
 def test_forward_hand_computed() -> None:
@@ -98,6 +106,7 @@ def test_recurrent_state_drives_hidden() -> None:
     w.hidden_prev[slot] = (0.9, -0.4)
 
     step.phase_think(w)
+    step.phase_plasticity(w)  # stage 21: the commit moved out of think
 
     assert w.actions[slot, 0] == pytest.approx(np.tanh(0.9), abs=1e-5)
     # the new state is committed for the next tick

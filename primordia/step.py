@@ -25,40 +25,45 @@ profiler in ``bench``):
        exp(senescence_rate * age), stage 11)
     8. perceive         (parallel: rays + smells + internal -> sensor_buf;
        ray reach also divided by wear)
-    9. think            (parallel: MLP forward -> hidden_buf, raw actions)
-    10. apply actions   (parallel: accel/turn -> vel/angle, eat/emit/donate/
+    9. think            (parallel: MLP forward -> hidden_buf, raw actions;
+       effective synapses genome + dw when plasticity is active, stage 21)
+    10. plasticity      (parallel: local Oja on dw — W1 from the sensors,
+        W_rec from the pre-commit hidden — then decay toward 0, clamp,
+        energy cost * |dw| moved, credit ablation, and the hidden_prev
+        commit that used to live inside think; zero RNG, genome untouched)
+    11. apply actions   (parallel: accel/turn -> vel/angle, eat/emit/donate/
         gather/build_fire/build_house gates; turning drains turn_cost *
         |radians| — steering is never free; top speed divided by wear)
-    11. emit signal     (serial: own-cell deposit of emit_rate * gate,
+    12. emit signal     (serial: own-cell deposit of emit_rate * gate,
         drained from energy at signal_emit_cost * gate, stage 13 — the
         deposit is only visible to perceive from the *next* tick, since
         perceive already ran; the contract is deliberate, never reordered)
-    12. donate          (serial: gift donate_rate * gate to the nearest
+    13. donate          (serial: gift donate_rate * gate to the nearest
         living neighbour within donate_range, stage 16 — energy moves in
         the same tick, no latency; who may receive is physics, whether to
         give is the gate)
-    13. gather          (serial: wood moves cell -> inventory, budgeted by
+    14. gather          (serial: wood moves cell -> inventory, budgeted by
         gather_rate * gate and clamped both ends, stage 17 — hauling is
         free to store, not to carry: movement still costs move_cost)
-    14. build           (serial: gates > 0.5 spend carried wood + energy
+    15. build           (serial: gates > 0.5 spend carried wood + energy
         into a structure on the creature's cell; build_fire on an existing
         fire refuels it with carried wood at no energy cost, stage 17 —
         whether building pays is never our call, only selection's)
-    15. rebuild structure fields (zero + stamp: exact-cell occupancy,
+    16. rebuild structure fields (zero + stamp: exact-cell occupancy,
         fire heat radius, house cover radius — a fire built this tick
         already cooks this tick: an object is not a signal, stage 17)
-    16. eat             (serial: shared cells; food first, then carrion;
+    17. eat             (serial: shared cells; food first, then carrion;
         extraction * gate; food eaten under fire earns cook_bonus x energy
         paid 1:1 from that fire's fuel, stage 17 — never created energy)
-    17. bite            (serial: contact predation; gate * diet budget,
+    18. bite            (serial: contact predation; gate * diet budget,
         energy transfer at bite_efficiency reduced by house cover, the
         dissipating share lands as carrion, prey at 0 energy is killed
         here and counted as predation)
-    18. integrate motion + wrap borders (parallel, alive only)
-    19. deaths          (serial: kill, deposit leftover body energy as carrion,
+    19. integrate motion + wrap borders (parallel, alive only)
+    20. deaths          (serial: kill, deposit leftover body energy as carrion,
         zero energy, push slot to free-list)
-    20. reproduce       (serial: energy >= threshold -> nearest partner within
-        mate_range -> child; uses the slots freed in phases 16 and 19;
+    21. reproduce       (serial: energy >= threshold -> nearest partner within
+        mate_range -> child; uses the slots freed in phases 17 and 20;
         newborns skip perceive/think until the next tick)
 
 Perception uses positions from the start of the tick, movement is applied
@@ -75,7 +80,7 @@ from __future__ import annotations
 import numpy as np
 from numba import njit, prange
 
-from .brain import apply_actions, think
+from .brain import apply_actions, plasticity, think
 from .cycles import growth_multiplier, light_level
 from .ecology import HERB_MAX, PRED_MIN
 from .genome import _reproduce
@@ -869,6 +874,47 @@ def phase_think(world: World) -> None:
         world.actions,
         world.alive,
         world.genome,
+        world.dw,
+        cfg.plasticity_active,  # stage 21: read effective synapses genome + dw
+        np.int32(cfg.sensor_input_dim),
+        np.int32(cfg.hidden_size),
+        np.int32(cfg.N_OUTPUTS),
+    )
+
+
+def phase_plasticity(world: World) -> None:
+    """Stage 21: local Oja on ``dw``, energy cost, hidden-state commit.
+
+    Runs right after think so ``hidden_buf`` holds this tick's response and
+    ``hidden_prev`` still holds the previous one (the recurrent presynaptic
+    side). The interval gate decides whether the rule fires at all; the
+    commit of ``hidden_prev`` happens unconditionally — that is the job
+    think gave up in this stage. See :func:`primordia.brain.plasticity`.
+    """
+    cfg = world.config
+    mode_gene = cfg.plasticity_mode == "gene"
+    eta_fixed = np.float32(
+        cfg.plasticity_rate if cfg.plasticity_mode == "fixed" else 0.0
+    )  # gene reads the per-creature trait; off must never move dw (config
+    # validation already forbids rate>0 outside "fixed" — belt and braces)
+    plasticity(
+        world.sensor_buf,
+        world.hidden_buf,
+        world.hidden_prev,
+        world.energy,
+        world.e_last_plastic,
+        world.alive,
+        world.genome,
+        world.dw,
+        eta_fixed,
+        mode_gene,
+        np.int32(cfg.plasticity_gene_offset),
+        cfg.plasticity_credit,
+        np.float32(cfg.plasticity_credit_strength),
+        (world.tick % cfg.plasticity_interval) == 0,
+        np.float32(cfg.plasticity_decay),
+        np.float32(cfg.plasticity_clip),
+        np.float32(cfg.plasticity_cost),
         np.int32(cfg.sensor_input_dim),
         np.int32(cfg.hidden_size),
         np.int32(cfg.N_OUTPUTS),
@@ -1271,6 +1317,9 @@ def phase_reproduce(world: World) -> None:
         world.alive,
         world.genome,
         world.hidden_prev,
+        world.inventory,
+        world.dw,
+        world.e_last_plastic,
         world.species_id,
         world.parent_id,
         world.creature_id,
@@ -1284,6 +1333,7 @@ def phase_reproduce(world: World) -> None:
         np.float32(cfg.mutation_rate),
         np.float32(cfg.mutation_std),
         np.float32(cfg.trait_mutation_std),
+        np.float32(cfg.plasticity_eta_std),
         np.int32(cfg.brain_params),
         np.float32(max(cfg.width, cfg.height)),
         np.float32(cfg.max_size),
@@ -1318,6 +1368,7 @@ PHASES = (
     ("age_metabolize", phase_age_and_metabolize),
     ("perceive", phase_perceive),
     ("think", phase_think),
+    ("plasticity", phase_plasticity),
     ("apply_actions", phase_apply_actions),
     ("emit_signal", phase_emit_signal),
     ("donate", phase_donate),

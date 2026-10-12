@@ -34,6 +34,11 @@ never resized. Array dtypes are part of the module contract:
     ray_unit (n_rays,2) float32,
     sensor_buf (N, input_dim) float32, hidden_buf (N, hidden) float32,
     hidden_prev (N, hidden) float32,   # Elman state: last tick's hidden (saved)
+    dw (N, plastic_params) float32,    # stage-21 Oja delta: W_eff = genome + dw,
+                                       # zeroed at birth, decays to 0, NOT inherited
+                                       # (Baldwin — the genome stays immutable in life)
+    e_last_plastic (N,) float32,       # energy at the previous tick, credit signal
+                                       # for the stage-21 delta-E ablation (saved)
     actions (N, 8) float32   # scratch buffers, zeroed once, reused every tick
 
 ``creature_id`` is a monotonic birth id (``next_id`` counts up); dead slots
@@ -261,6 +266,12 @@ class World:
         self.sensor_buf = np.zeros((n, config.sensor_input_dim), dtype=np.float32)
         self.hidden_buf = np.zeros((n, config.hidden_size), dtype=np.float32)
         self.actions = np.zeros((n, config.N_OUTPUTS), dtype=np.float32)
+        # Stage-21 plasticity: the Oja delta lives in its own scratch so the
+        # genome is never written during a life (Baldwin, not Lamarck).
+        self.dw = np.zeros((n, config.plastic_params), dtype=np.float32)
+        # Energy at the previous tick for the delta-E credit ablation; set
+        # to the birth energy, updated every tick by phase_plasticity.
+        self.e_last_plastic = np.zeros(n, dtype=np.float32)
 
         gh, gw = config.grid_shape
         self.cell_w = np.float32(config.width / gw)
@@ -563,6 +574,8 @@ class World:
         self.energy[slots] = cfg.initial_energy
         self.age[slots] = 0
         self.hidden_prev[slots] = 0.0  # newborns start with an empty memory
+        self.dw[slots] = 0.0  # no learned delta yet (stage 21, Baldwin)
+        self.e_last_plastic[slots] = cfg.initial_energy
 
         params = cfg.brain_params
         self.genome[slots, :params] = self.rng.normal(
@@ -576,6 +589,9 @@ class World:
         self.genome[slots, traits + 4] = self.rng.uniform(
             0.0, 1.0, count
         )  # tag_hue: neutral lineage colour (stage 15)
+        self.genome[slots, traits + 5] = 0.0  # plasticity eta (stage 21): born
+        # unlearned; only mutation can turn learning on, and it always pays
+        # plasticity_cost — selection decides whether the gene is worth it
 
         self.species_id[slots] = 0
         self.parent_id[slots] = -1

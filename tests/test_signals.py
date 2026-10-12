@@ -161,7 +161,7 @@ def test_brain_layout_signal_numbers() -> None:
     assert Config.N_OUTPUTS == 8
     assert cfg.sensor_input_dim == 35
     assert cfg.brain_params == 485
-    assert cfg.genome_size == 490
+    assert cfg.genome_size == 491  # + plasticity eta trait (stage 21)
     w = World(cfg, seed=0)
     assert w.actions.shape == (cfg.max_creatures, 8)
     assert w.sensor_buf.shape == (cfg.max_creatures, 35)

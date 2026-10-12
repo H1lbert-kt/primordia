@@ -76,7 +76,18 @@ limitations in each experiment's README.
 > added the civilization base (a wood-smell input and three outputs for
 > gather/build-fire/build-house, `FORMAT_VERSION 9`). Stage 18
 > recalibrated the *default* prices only (fire 10 → 5, houses priced
-> out of the default world at 1e6 — Config, no tick change). The experiment
+> out of the default world at 1e6 — Config, no tick change), stage 19
+> added the SQLite daemon (Config/CLI/storage only), and stage 21 opened
+> lifetime Oja plasticity on a separate `dw` scratch (6th body trait η,
+> 491 genome params, `FORMAT_VERSION 10` — the effective synapses are
+> `genome + dw`, and the genome is never written inside a life). The
+> plasticity **default is off**, and with it the tick is bit-identical
+> to the pre-stage-21 logic; but the genome grew 490 → 491 (the η trait
+> adds one mutation draw at birth), which shifts the shared Numba RNG
+> stream — so even `off` reruns on current HEAD may produce different
+> trajectories and numbers than stage-19/20 caches. Bit-exact
+> reproduction of old figures still needs the old commit. The
+> experiment
 > scripts pin the old regime
 > off via `STAGE8_BASE` so the *regime* is preserved — but reruns on current
 > HEAD use the sexual dynamics; the original asexual runs stay in each
@@ -170,6 +181,37 @@ of the population**; median lineage depth 6–7 generations.
 
 ![lineage](experiments/lineage/figs/lineage.png)
 
+### 5. Lifetime learning exists — and selection prices it (stage 21)
+
+Synapses now adapt during a life by Oja's local rule with **no reward**:
+the learned delta `dw` rides on top of the immutable genome, decays back
+to the blueprint, and every unit of `|dw|` moved is billed to the
+creature's energy (one fixed price, `plasticity_cost=1.0` — held
+constant through the whole stage; any price change is a separate
+sensitivity experiment, not mixed into these results). In 6 variants ×
+3 seeds × 10k
+([`experiments/plasticity/`](experiments/plasticity/)), pure Oja never
+beats the control (fixed η=1e-4/1e-3 end 832–1155 vs 1053–1531 alive;
+η=1e-2 goes **extinct 3/3 at ~5k** — the price window closes above
+1e-3). The evolvable η gene (pinned in
+`configs/proto_culture.toml`; the Config default is **off**, the
+baseline older experiments measured) survives **1141/1265/1461** with
+learning engaged (`|dw|` up to 2.0) yet rare — 0.6–0.75% of survivors
+carry η>0. The selection test was run and it says *suppression*, not
+promotion: mean η (and its max, and its share) sits **below the
+gene's own neutral-drift control in all 3 seeds** (final η̄ 2–5×10⁻⁵
+under plasticity vs 4–10×10⁻⁴ drifting unused; same for the mid-run
+means). By the criterion set before reading the data, this is negative
+selection — the cost is being paid for — and the surviving learners are
+mutation–selection balance, not proof that selection *turned learning
+on*. The only variant with local credit assignment (learning reads the
+creature's own energy change) destabilises hard (65/868/466) — which is
+why reward-like credit is off by default. Clones confirm the separation
+of concerns: identical genomes in two environments diverge in `dw`
+(0.55) while staying **bit-equal** in the genome (0.000000).
+
+![plasticity](experiments/plasticity/figs/gate.png)
+
 ## Viewer
 
 `python run.py --seed 42` opens the pygame-ce window: drag to pan, wheel to
@@ -212,7 +254,11 @@ that together cost ~138 µs/tick ≈ **1.2%** of the tick at N=2000 (profile:
 and the 30 ticks/s floor at N=2000 holds with 5–8× margin (`alive_final`
 109/662/1112 under the stage-18 default prices). Stage 16's donate phase
 (0.75 µs at default, ~24 µs when gifts are active) and earlier per-phase
-costs are listed in `AGENTS.md`. The stage-10 economy holds different
+costs are listed in `AGENTS.md`. Stage 21's plasticity phase costs
+~130 µs/tick ≈ **4%** at N=2000 when engaged; the A/B same-session
+measurement (mode `off` vs `gene`, load ~7) was 301/259 vs 285/253
+ticks/s at N=2000 — a 2–5% price with the 30 ticks/s floor intact. The
+stage-10 economy holds different
 populations than older tables during a 1000-tick bench, so they are not
 directly comparable to earlier runs. `python -m primordia.bench [--profile]`
 reproduces the table.
@@ -231,6 +277,8 @@ python experiments/proto_culture/run.py --phase gate
 python experiments/civilization/run.py --phase pilot   # stage 17: wood/fire/houses
 python experiments/civilization/run.py --phase gate --house-energy 12
 python experiments/civilization/run.py --phase gate --house-energy 1000000  # control
+python experiments/plasticity/run.py --ticks 10000  # stage 21: Oja ablation (~15 min)
+python experiments/plasticity/run.py --phase clones
 
 # stats + plots
 python run.py --seed 42 --headless --ticks 5000 --stats s42.npz
@@ -262,7 +310,7 @@ primordia/
   step.py     stats.py   io.py       bench.py ecology.py
   database.py # stage-19 SQLite world store (daemon checkpoints + timeline)
   render/     # pygame viewer + headless GIF recorder (never imported by core)
-tests/        # 220 tests: determinism, invariants, save/load, guards
+tests/        # 236 tests: determinism, invariants, save/load, guards
 experiments/  # one script + README per experiment
 run.py        # CLI: --seed --headless --ticks --load --save --stats
               #      --config --record --screenshot --select
@@ -305,8 +353,15 @@ alive at 5k — so houses are priced out of the default (1e6) and the
 fire swept 5/10/20; the new default ends 1163/1170/821 alive at 10k,
 Config-only, no tick change), and the daemon (stage 19: a world that
 runs by itself — SQLite checkpoints + timeline via stdlib, resume
-bit-identical, the window opens the newest snapshot). The "real world"
-roadmap continues with territory / Oja. Known open
+bit-identical, the window opens the newest snapshot), and lifetime
+plasticity (stage 21: Oja's rule on a separate, decaying, energy-billed
+`dw` delta with an evolvable learning-rate gene — pure Oja never beats
+the control and η=1e-2 goes extinct; the evolvable gene's distribution
+sits *below* neutral drift in 3/3 seeds, i.e. the cost is selected
+against, not learning for — Config default off, gene pinned in
+`configs/proto_culture.toml`, in `experiments/plasticity/`). The "real world"
+roadmap continues with territory (stage 20, still pending — skipped
+ahead to Oja by choice). Known open
 problems are documented above (predation still a trickle, creatures still
 circle) rather than hidden.
 
