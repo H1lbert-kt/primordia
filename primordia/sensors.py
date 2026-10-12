@@ -22,16 +22,22 @@ Input vector layout (``Config.sensor_input_dim`` floats, written into
                              left/right antennas over the signal — the same
                              cross-product split as the food antennas, so a
                              creature can steer toward or away from a call
+    [3n+12 : 3n+13)          tag (stage 15): hue similarity of the neighbours —
+                             dot of the window's summed (cos, sin) hue vectors
+                             (self removed) with the creature's own unit
+                             vector / cells: +1 = everyone here shares my
+                             colour, ~0 = alone or unaligned, <0 = opposite
 
 Rays march in steps of one cell up to the creature's ``vision_range`` body
 trait times the current light level ``L(t)`` (seeing in the dark is seeing
 less far) divided by the wear factor ``exp(senescence_rate * age)`` (stage
 11: old eyes see less), wrapping toroidally like the rest of the world.
 Creature counts come from ``World.cell_counts``, carrion smell from
-``World.meat`` and signal smell from ``World.signal`` (all current):
-O(cells + N), never O(N^2). A creature smells its own emission (no
-self-exclusion on the signal field): self-monitoring is allowed to evolve.
-No random numbers are drawn in this module.
+``World.meat``, signal smell from ``World.signal`` and tag similarity from
+``World.cell_tag_re``/``cell_tag_im`` (all current): O(cells + N), never
+O(N^2). A creature smells its own emission (no self-exclusion on the signal
+field): self-monitoring is allowed to evolve. No random numbers are drawn
+in this module.
 """
 
 from __future__ import annotations
@@ -67,6 +73,7 @@ def input_groups(config: Config) -> tuple[tuple[str, slice | np.ndarray], ...]:
         ("speed", slice(smell + 7, smell + 8)),
         ("light", slice(smell + 8, smell + 9)),
         ("signal", slice(smell + 9, smell + 12)),
+        ("tag", slice(smell + 12, smell + 13)),
     )
 
 
@@ -84,6 +91,10 @@ def perceive(
     signal: np.ndarray,
     cell_counts: np.ndarray,
     cell_diet: np.ndarray,
+    cell_tag_re: np.ndarray,
+    cell_tag_im: np.ndarray,
+    hue_re: np.ndarray,
+    hue_im: np.ndarray,
     ray_unit: np.ndarray,
     sensor_buf: np.ndarray,
     n_rays: np.int32,
@@ -197,6 +208,10 @@ def perceive(
         ssig = np.float32(0.0)
         ssig_left = np.float32(0.0)
         ssig_right = np.float32(0.0)
+        # tag (stage 15): summed (cos, sin) of the neighbours' hues, self
+        # excluded below — "are the creatures around me my colour?"
+        str_ = np.float32(0.0)
+        sti_ = np.float32(0.0)
         for dy in range(-smell_r, smell_r + 1):
             for dx in range(-smell_r, smell_r + 1):
                 iy = iy0 + dy
@@ -214,6 +229,8 @@ def perceive(
                 sc = sc + np.float32(cell_counts[iy, ix])
                 sp = sp + cell_diet[iy, ix]
                 scarrion = scarrion + meat[iy, ix]
+                str_ = str_ + cell_tag_re[iy, ix]
+                sti_ = sti_ + cell_tag_im[iy, ix]
                 sig = signal[iy, ix]
                 ssig = ssig + sig
                 cross = c * np.float32(dy) - s * np.float32(dx)
@@ -248,3 +265,13 @@ def perceive(
         sensor_buf[i, base + 9] = ssig * inv_sig
         sensor_buf[i, base + 10] = ssig_left * inv_sig * np.float32(2.0)
         sensor_buf[i, base + 11] = ssig_right * inv_sig * np.float32(2.0)
+
+        # tag similarity (stage 15): dot of the window's summed neighbour
+        # hue vector (my own cell contribution removed) with my own unit
+        # vector, normalised by window cells — +1 = everyone here is my
+        # colour, ~0 = alone or no alignment, negative = the opposite hue.
+        own_re = hue_re[i]
+        own_im = hue_im[i]
+        sensor_buf[i, base + 12] = (
+            (str_ - own_re) * own_re + (sti_ - own_im) * own_im
+        ) * inv_smell

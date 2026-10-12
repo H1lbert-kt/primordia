@@ -1,11 +1,13 @@
 """Save and load the entire world as a versioned ``.npz`` (stage 7).
 
-Format v6 stores exactly what is needed to continue a run bit-for bit
+Format v7 stores exactly what is needed to continue a run bit-for bit
 (v2 added ``food_field`` and ``hidden_prev``; v3 adds ``terrain``, the
 stage-10 geography; v4 adds ``meat`` and ``meat_eaten``, the stage-11
 carrion cycle; v5 widens the genealogy log to 4 columns so both parents
 are recorded, the stage-12 reproductive-barrier metric; v6 adds ``signal``
-and ``signal_emitted``, the stage-13 communication field; readers reject
+and ``signal_emitted``, the stage-13 communication field; v7 is a layout
+bump — the stage-15 tag adds a body trait, so ``genome`` grows from 488
+to 499 columns and the old width would mismatch on load; readers reject
 older versions with a clear message):
 
     format_version  int32 scalar; readers reject other versions
@@ -52,7 +54,7 @@ from .config import Config
 from .genome import get_numba_rng_state, set_numba_rng_state
 from .world import World
 
-FORMAT_VERSION = 6
+FORMAT_VERSION = 7
 
 _INT_SCALARS = (
     "seed",

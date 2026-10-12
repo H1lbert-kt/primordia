@@ -102,6 +102,10 @@ FLOAT_COLUMNS = (
     "signal_mass",
     "signal_cells",
     "emit_mean",
+    "hue_mean",
+    "hue_spread",
+    "tag_sim_mean",
+    "win_neigh",
     "genome_dist",
     "n_species",
     "barrier",
@@ -256,6 +260,30 @@ class StatsRecorder:
             cols["emit_mean"][i] = np.float32(
                 0.5 * (1.0 + np.tanh(world.actions[alive, 3])).mean()
             )
+            # tag hue as a circular variable (stage 15): the arithmetic
+            # mean of an angle would land mid-wheel for a bimodal spread
+            hue = world.genome[alive, world.config.brain_params + 4]
+            ang = np.float32(2.0 * np.pi) * hue
+            cm = float(np.cos(ang).mean())
+            sm = float(np.sin(ang).mean())
+            cols["hue_mean"][i] = np.float32(
+                (np.arctan2(sm, cm) / (2.0 * np.pi)) % 1.0
+            )
+            # 0 = every creature the same colour, 1 = uniformly spread
+            cols["hue_spread"][i] = np.float32(1.0 - np.hypot(cm, sm))
+            tag_in = 3 * world.config.n_rays + 12
+            cols["tag_sim_mean"][i] = np.float32(
+                world.sensor_buf[alive, tag_in].mean()
+            )
+            # mean living neighbours in the smell window (stage 15): the
+            # sensor's own crowd reading x window cells, so the tag
+            # similarity can be judged against observed spacing, not only
+            # against a spatially random baseline
+            crowd_in = world.config.n_rays + 1
+            side = 2 * world.config.smell_radius_cells + 1
+            cols["win_neigh"][i] = np.float32(
+                float(side * side) * world.sensor_buf[alive, crowd_in].mean()
+            )
         else:
             cols["mean_energy"][i] = 0.0
             cols["mean_age"][i] = 0.0
@@ -264,6 +292,10 @@ class StatsRecorder:
             cols["n_predator"][i] = 0
             cols["diet_max"][i] = 0.0
             cols["emit_mean"][i] = 0.0
+            cols["hue_mean"][i] = 0.0
+            cols["hue_spread"][i] = 0.0
+            cols["tag_sim_mean"][i] = 0.0
+            cols["win_neigh"][i] = 0.0
             means = stds = np.zeros(4, dtype=np.float32)
         for k, trait in enumerate(("speed", "size", "vision", "diet")):
             cols[f"{trait}_mean"][i] = np.float32(means[k])

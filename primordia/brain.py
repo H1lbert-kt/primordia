@@ -7,7 +7,7 @@ Genome layout per creature (float32 row, offsets derived from ``Config``):
     W2 (outputs, hidden)   [+hid, +hid + out*hid)
     b2                     [+out, +out + out)
     W_rec (hidden, hidden) [+out, +hid*hid)     # Elman recurrence
-    body traits            [brain_params, +4)   # max_speed, size, vision_range, diet
+    body traits            [brain_params, +5)   # max_speed, size, vision_range, diet, tag_hue
 
 ``think`` is an Elman network: each hidden unit also reads the previous
 tick's hidden state (``hidden_prev``) through ``W_rec``, then the new state

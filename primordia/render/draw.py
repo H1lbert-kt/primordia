@@ -13,7 +13,8 @@ trail and the event flashes use ``pygame.draw`` (those stay at full
 brightness so the UI reads against a night-dark world).
 
 Body-trait layout (see ``Config``): ``brain_params + 0`` max_speed,
-``+1`` size, ``+2`` vision, ``+3`` diet — the pixel radius comes from size.
+``+1`` size, ``+2`` vision, ``+3`` diet — the pixel radius comes from size;
+``+4`` tag_hue — the lineage ring color (stage 15).
 
 Render-side state trackers (``EventTracker``, ``SparkTracker``) diff
 successive frames into flashes/sparklines; they only *read* the world and
@@ -22,6 +23,7 @@ draw no random numbers, so recording stays bit-identical to headless runs.
 
 from __future__ import annotations
 
+import colorsys
 from collections import deque
 from dataclasses import dataclass
 
@@ -72,6 +74,90 @@ def _humanoid_offsets(
         oy = oy.astype(np.int32) - rot.get_height() // 2
         _SPRITE_CACHE[key] = (ox, oy)
     return _SPRITE_CACHE[key]
+
+
+# Lineage-ring masks per sprite radius (stage 15).
+_RING_CACHE: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+
+# Rainbow LUT: tag_hue in [0,1) -> full-saturation RGB (cached, 256 bins).
+_HUE_LUT: np.ndarray | None = None
+
+
+def hue_lut() -> np.ndarray:
+    """(256, 3) uint8 lookup from tag_hue (index/255) to rainbow RGB."""
+    global _HUE_LUT
+    if _HUE_LUT is None:
+        _HUE_LUT = np.array(
+            [
+                np.multiply(colorsys.hsv_to_rgb(i / 256.0, 1.0, 1.0), 255.0)
+                for i in range(256)
+            ],
+            dtype=np.float64,
+        )
+    return _HUE_LUT
+
+
+def _ring_offsets(radius: int) -> tuple[np.ndarray, np.ndarray]:
+    """Pixel offsets of a thin halo hugging the sprite of ``radius``.
+
+    The band sits just outside the humanoid silhouette (which spans up to
+    ~0.93r), so the sprite always paints over the inner edge. Cached per
+    radius; callers scatter the per-creature tag colour onto these offsets.
+    """
+    if radius not in _RING_CACHE:
+        inner = radius + 0.4
+        outer = radius + 1.4
+        side = int(np.ceil(2.0 * outer)) + 3
+        if side % 2 == 0:
+            side += 1
+        c = side // 2
+        yy, xx = np.mgrid[0:side, 0:side]
+        d = np.hypot(xx - c, yy - c)
+        ox, oy = np.nonzero((d >= inner) & (d <= outer))
+        _RING_CACHE[radius] = (
+            ox.astype(np.int32) - c,
+            oy.astype(np.int32) - c,
+        )
+    return _RING_CACHE[radius]
+
+
+def _scatter_groups(
+    pixels: np.ndarray,
+    ix: np.ndarray,
+    iy: np.ndarray,
+    key: np.ndarray,
+    cols: np.ndarray,
+    viewport_width: int,
+    viewport_height: int,
+    offsets_fn,
+) -> None:
+    """Paint each ``key`` group with its ``offsets_fn(k)`` pixel mask.
+
+    Shared by the humanoid pass and the lineage ring: one stable sort and
+    one vectorized copy per group, no Python loop over creatures.
+    """
+    order = np.argsort(key, kind="stable")
+    key = key[order]
+    ix = ix[order]
+    iy = iy[order]
+    cols = cols[order]
+    unique, starts = np.unique(key, return_index=True)
+    ends = np.append(starts[1:], key.size)
+    for k, kv in enumerate(unique):
+        a, b = int(starts[k]), int(ends[k])
+        ox, oy = offsets_fn(int(kv))
+        if ox.size == 0:
+            continue
+        xs = (ix[a:b, None] + ox[None, :]).ravel()
+        ys = (iy[a:b, None] + oy[None, :]).ravel()
+        cc = np.repeat(cols[a:b], ox.size)
+        ok = (xs >= 0) & (xs < viewport_width) & (ys >= 0) & (
+            ys < viewport_height
+        )
+        if ok.all():
+            pixels[xs, ys] = cc
+        else:
+            pixels[xs[ok], ys[ok]] = cc[ok]
 
 
 def pixel_format(surface: pygame.Surface) -> PixelFormat:
@@ -219,9 +305,11 @@ def stamp_creatures(
 ) -> None:
     """Scatter every living creature as an oriented humanoid sprite.
 
-    Grouping key = ``(radius, heading bucket)`` (at most
-    ``max_radius_px * sprite_buckets`` poses); one vectorized pass paints
-    each group with its pose's alpha mask. ``light`` dims the sprites with
+    The lineage ring (stage 15) paints first — a thin halo in each
+    creature's tag hue, grouped by radius only — then the humanoid pass
+    (grouping key ``(radius, heading bucket)``, at most
+    ``max_radius_px * sprite_buckets`` poses) paints each group with its
+    pose's alpha mask over the ring's inner edge. ``light`` dims both with
     the world (the selection overlay stays bright).
     """
     vh = pixels.shape[1]
@@ -237,6 +325,17 @@ def stamp_creatures(
         world.genome[slots, size_trait] * camera.zoom * settings.size_scale
     ).astype(np.int32)
     np.clip(radius, 1, settings.max_radius_px, out=radius)
+
+    # lineage ring: identity colour only — brightness follows the light,
+    # never the energy, so the tag reads the same at any charge level
+    lut = hue_lut()
+    hue_idx = np.clip(
+        world.genome[slots, world.config.brain_params + 4] * 255.0, 0, 255
+    ).astype(np.int32)
+    ring_rgb = (lut[hue_idx] * light).astype(np.uint8)
+    ring_cols = rgb_to_pixel(ring_rgb, shifts)
+    _scatter_groups(pixels, ix, iy, radius, ring_cols, vw, vh, _ring_offsets)
+
     buckets = int(settings.sprite_buckets)
     two_pi = np.float32(2.0 * np.pi)
     bucket = (
@@ -245,28 +344,11 @@ def stamp_creatures(
     key = radius * buckets + bucket
     colors = rgb_to_pixel(creature_colors(world, settings, light), shifts)
 
-    order = np.argsort(key, kind="stable")
-    key = key[order]
-    ix = ix[order]
-    iy = iy[order]
-    colors = colors[order]
-    unique, starts = np.unique(key, return_index=True)
-    ends = np.append(starts[1:], key.size)
+    def humanoid_offsets(kv: int) -> tuple[np.ndarray, np.ndarray]:
+        r, ib = divmod(kv, buckets)
+        return _humanoid_offsets(r, ib, buckets)
 
-    for k, kv in enumerate(unique):
-        a, b = int(starts[k]), int(ends[k])
-        r, ib = divmod(int(kv), buckets)
-        ox, oy = _humanoid_offsets(r, ib, buckets)
-        if ox.size == 0:
-            continue
-        xs = (ix[a:b, None] + ox[None, :]).ravel()
-        ys = (iy[a:b, None] + oy[None, :]).ravel()
-        cols = np.repeat(colors[a:b], ox.size)
-        ok = (xs >= 0) & (xs < vw) & (ys >= 0) & (ys < vh)
-        if ok.all():
-            pixels[xs, ys] = cols
-        else:
-            pixels[xs[ok], ys[ok]] = cols[ok]
+    _scatter_groups(pixels, ix, iy, key, colors, vw, vh, humanoid_offsets)
 
 
 def pick_creature(

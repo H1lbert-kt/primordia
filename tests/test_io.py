@@ -152,6 +152,23 @@ def test_v4_save_is_rejected_clearly(tmp_path: Path) -> None:
         load_world(str(path))
 
 
+def test_v5_save_is_rejected_clearly(tmp_path: Path) -> None:
+    """Pre-stage-13 saves lack signal; the version gate must say so."""
+    path = tmp_path / "old.npz"
+    np.savez(path, format_version=np.int32(5))
+    with pytest.raises(ValueError, match="format"):
+        load_world(str(path))
+
+
+def test_v6_save_is_rejected_clearly(tmp_path: Path) -> None:
+    """Pre-stage-15 saves have a 488-column genome; the gate must reject
+    before the 499-column shape mismatch (stage 15 layout bump)."""
+    path = tmp_path / "old.npz"
+    np.savez(path, format_version=np.int32(6))
+    with pytest.raises(ValueError, match="format"):
+        load_world(str(path))
+
+
 def test_numba_rng_state_helpers_roundtrip() -> None:
     """Guard: numba._helperlib must keep exposing the stream (see genome.py)."""
 

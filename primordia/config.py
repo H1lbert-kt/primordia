@@ -19,7 +19,7 @@ class Config:
     """
 
     N_OUTPUTS: ClassVar[int] = 4  # accel, turn, eat-gate, emit-gate (stage 13)
-    N_BODY_TRAITS: ClassVar[int] = 4  # max_speed, size, vision_range, diet
+    N_BODY_TRAITS: ClassVar[int] = 5  # max_speed, size, vision_range, diet, tag_hue
 
     # --- world geometry ---
     width: float = 1000.0
@@ -95,7 +95,7 @@ class Config:
     smell_radius_cells: int = 1  # (2r+1)^2 cells sensed around the creature
 
     # --- brain ---
-    # 10 keeps brain_params at 484 (with the 33 inputs + 4 outputs + W_rec),
+    # 10 keeps brain_params at 494 (with the 34 inputs + 4 outputs + W_rec),
     # inside the 100-500 parameter budget; 12 would push it well beyond.
     hidden_size: int = 10
     weight_init_std: float = 0.5  # std of N(0, std) weights drawn at spawn
@@ -280,9 +280,10 @@ class Config:
         """Inputs: 3 ray channels (food sum, creatures, food peak), 4 smells
         (food, creatures, prey-diet, carrion — stage 11), 2 food antennas
         (left/right of heading), 3 internal sensors (energy, speed,
-        ambient light — stage 10's circadian cue) and, since stage 13, 3
-        signal slots (smell + left/right antennas over the signal field)."""
-        return self.n_rays * 3 + 12
+        ambient light — stage 10's circadian cue), 3 signal slots (smell +
+        left/right antennas over the signal field, stage 13) and, since
+        stage 15, 1 tag slot (hue similarity of the neighbours)."""
+        return self.n_rays * 3 + 13
 
     @property
     def brain_params(self) -> int:

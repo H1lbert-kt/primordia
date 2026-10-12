@@ -14,12 +14,15 @@ Mutation policy (per gene, probability ``Config.mutation_rate``):
     brain genes [0, brain_params)   additive   + N(0, mutation_std)
     max_speed, size, vision_range   multiplicative  * exp(N(0, trait_std))
     diet [brain_params+3]           additive   + N(0, trait_std), clamped
+    tag_hue [brain_params+4]        circular   + N(0, trait_std) mod 1
 Diet is additive because it starts at 0 (herbivore) and a multiplicative
-mutation could never make it leave zero. After mutation, traits are clamped
-to physically valid ranges (``max_dim`` caps speed and vision: on a torus,
-sensing or moving farther than the world itself is redundant, and the cap
-bounds ray sampling cost; ``max_size`` caps contact reach so neighbour scans
-stay bounded).
+mutation could never make it leave zero. Hue is circular: it identifies a
+lineage in [0, 1) and a multiplicative mutation would drag every colour
+towards 0, so the noise is added and wrapped instead. After mutation,
+traits are clamped to physically valid ranges (``max_dim`` caps speed and
+vision: on a torus, sensing or moving farther than the world itself is
+redundant, and the cap bounds ray sampling cost; ``max_size`` caps contact
+reach so neighbour scans stay bounded).
 
 Determinism: the serial kernel draws from the Numba RNG, which is a global
 stream seeded once at ``World`` construction (``seed_numba_rng``). Because the
@@ -258,6 +261,10 @@ def _reproduce(
             if d > 1.0:
                 d = 1.0
             genome[child, t + 3] = d
+        # tag_hue (circular: wrap keeps the lineage colour in [0, 1))
+        if np.random.random() < mutation_rate:
+            h = genome[child, t + 4] + np.random.normal(0.0, trait_std)
+            genome[child, t + 4] = h - np.floor(h)
 
         # Child state: born in place, initiator tracked for the lineage.
         pos[child, 0] = pos[i, 0]

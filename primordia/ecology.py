@@ -44,7 +44,8 @@ def genome_scales(cfg: Config) -> np.ndarray:
     """Per-gene spawn scales so distances mix dimensionless genes.
 
     Brain genes are scaled by ``weight_init_std`` (or 1.0 if that is 0);
-    body traits by ``max_speed``, 1.0, ``vision_range``, 1.0. Shared by
+    body traits by ``max_speed``, 1.0, ``vision_range``, 1.0, 1.0 (the
+    tag_hue hue is already in [0, 1), stage 15). Shared by
     ``stats._genome_dist`` and ``cluster_living`` so both metrics live in
     the same normalized space.
     """
@@ -56,6 +57,7 @@ def genome_scales(cfg: Config) -> np.ndarray:
     scale[params + 1] = 1.0
     scale[params + 2] = cfg.vision_range
     scale[params + 3] = 1.0
+    scale[params + 4] = 1.0
     return scale
 
 

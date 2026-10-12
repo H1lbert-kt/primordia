@@ -15,6 +15,8 @@ never resized. Array dtypes are part of the module contract:
     signal_buf (H,W) float32 is the stage-14 Jacobi staging buffer),
     cell_counts (H,W) int32,
     cell_diet (H,W) float32, cell_offsets (H*W+1,) int32,
+    cell_tag_re/im (H,W) float32,  # per-cell (cos,sin) of tag_hue, stage 15
+    hue_re/im (N,) float32,        # per-slot (cos,sin) of tag_hue, stage 15
     cell_slots (N,) int32, cell_cursor (H*W,) int32 scratch,
     genealogy (L,4) int32,   # birth log rows (tick, child_id, parent_id, partner_id)
     ray_unit (n_rays,2) float32,
@@ -54,6 +56,10 @@ def _rebuild_grid(
     traits_off: np.int32,
     counts: np.ndarray,
     diet_sum: np.ndarray,
+    tag_re: np.ndarray,
+    tag_im: np.ndarray,
+    hue_re: np.ndarray,
+    hue_im: np.ndarray,
     offsets: np.ndarray,
     slots: np.ndarray,
     cursor: np.ndarray,
@@ -62,13 +68,15 @@ def _rebuild_grid(
     gw: np.int32,
     gh: np.int32,
 ) -> None:
-    """Serial counting sort: per-cell counts, diet sums and CSR slot lists.
+    """Serial counting sort: per-cell counts, diet sums, tag vectors, CSR.
 
-    Slots are visited in ascending order in both passes, so the float32 diet
-    sums and the CSR layout are deterministic bit for bit. ``counts`` and
-    ``diet_sum`` must be zeroed by the caller; ``offsets`` is fully rewritten.
+    Slots are visited in ascending order in both passes, so the float32
+    diet and tag sums and the CSR layout are deterministic bit for bit.
+    ``counts``, ``diet_sum`` and the tag grids must be zeroed by the
+    caller; ``offsets`` is fully rewritten. ``hue_re``/``hue_im`` are the
+    precomputed (cos, sin) of each slot's tag_hue (stage 15).
     """
-    # Pass A: counts and diet sums per cell.
+    # Pass A: counts, diet sums and hue unit vectors per cell.
     for i in range(alive.size):
         if alive[i]:
             ix = int(pos[i, 0] * inv_cell_w)
@@ -83,6 +91,8 @@ def _rebuild_grid(
                 iy = gh - 1
             counts[iy, ix] = counts[iy, ix] + 1
             diet_sum[iy, ix] = diet_sum[iy, ix] + genome[i, traits_off + 3]
+            tag_re[iy, ix] = tag_re[iy, ix] + hue_re[i]
+            tag_im[iy, ix] = tag_im[iy, ix] + hue_im[i]
 
     # Prefix sums over cells in row-major order. The reshape keeps a flat
     # view (counts is C-contiguous), avoiding a divide+modulo per cell.
@@ -159,6 +169,14 @@ class World:
         self.signal_buf = np.zeros((gh, gw), dtype=np.float32)
         self.cell_counts = np.zeros((gh, gw), dtype=np.int32)
         self.cell_diet = np.zeros((gh, gw), dtype=np.float32)
+        # Per-cell hue unit vectors (stage 15): (cos, sin) of tag_hue summed
+        # over living slots, rebuilt with the counts; scratch, never saved.
+        self.cell_tag_re = np.zeros((gh, gw), dtype=np.float32)
+        self.cell_tag_im = np.zeros((gh, gw), dtype=np.float32)
+        # Per-slot (cos, sin) of tag_hue, refreshed by rebuild_counts so
+        # perceive reads them instead of drawing trig per creature.
+        self.hue_re = np.zeros(n, dtype=np.float32)
+        self.hue_im = np.zeros(n, dtype=np.float32)
         n_cells = gh * gw
         self.cell_offsets = np.zeros(n_cells + 1, dtype=np.int32)
         self.cell_slots = np.zeros(n, dtype=np.int32)
@@ -288,9 +306,15 @@ class World:
         return int(np.count_nonzero(self.alive))
 
     def rebuild_counts(self) -> None:
-        """Rebuild the per-cell grids: creature counts, diet sums, CSR lists."""
+        """Rebuild the per-cell grids: counts, diet/tag sums, CSR lists."""
         self.cell_counts.fill(0)
         self.cell_diet.fill(0.0)
+        self.cell_tag_re.fill(0.0)
+        self.cell_tag_im.fill(0.0)
+        # vectorized trig once per tick (cheaper than per-cell cos/sin)
+        hue = self.genome[:, self.config.brain_params + 4]
+        np.cos(np.float32(2.0 * np.pi) * hue, out=self.hue_re)
+        np.sin(np.float32(2.0 * np.pi) * hue, out=self.hue_im)
         gh, gw = self.cell_counts.shape
         _rebuild_grid(
             self.pos,
@@ -299,6 +323,10 @@ class World:
             np.int32(self.config.brain_params),
             self.cell_counts,
             self.cell_diet,
+            self.cell_tag_re,
+            self.cell_tag_im,
+            self.hue_re,
+            self.hue_im,
             self.cell_offsets,
             self.cell_slots,
             self.cell_cursor,
@@ -340,6 +368,9 @@ class World:
         self.genome[slots, traits + 1] = 1.0  # size (contact, stage 5)
         self.genome[slots, traits + 2] = cfg.vision_range
         self.genome[slots, traits + 3] = 0.0  # diet: 0 = herbivore (stage 5)
+        self.genome[slots, traits + 4] = self.rng.uniform(
+            0.0, 1.0, count
+        )  # tag_hue: neutral lineage colour (stage 15)
 
         self.species_id[slots] = 0
         self.parent_id[slots] = -1

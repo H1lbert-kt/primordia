@@ -136,6 +136,14 @@ def test_determinism_with_predation() -> None:
         _place(w, v, 501.0, 500.0, 30.0, diet=0.5, gate=1.0)
         # near-zero speed keeps the pair in contact long enough to kill
         w.genome[[a, v], cfg.brain_params] = 0.01
+        # eat-gate bias pins WHO bites: the initiator feeds (budget =
+        # bite_rate * gate * diet), the partner cannot bite back, so a
+        # predation death is guaranteed whatever the random weights are
+        # (the genome layout changes would otherwise reshuffle the stream)
+        n_in, n_hid, n_out = cfg.sensor_input_dim, cfg.hidden_size, Config.N_OUTPUTS
+        b2 = n_hid * n_in + n_hid + n_out * n_hid
+        w.genome[a, b2 + 2] = 20.0
+        w.genome[v, b2 + 2] = -20.0
         for _ in range(300):  # sequential worlds: process-global Numba RNG
             step.advance(w)
         return w

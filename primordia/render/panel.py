@@ -15,6 +15,7 @@ import pygame
 
 from ..cycles import light_level, season_multiplier
 from ..sensors import input_groups
+from .draw import hue_lut
 from .settings import Settings
 
 _FONT_CACHE: dict[int, pygame.font.Font] = {}
@@ -206,7 +207,7 @@ def render_panel(
         )
         frac = float(world.energy[slot]) / (cfg.reproduce_threshold * 2.0)
         _hbar(dst, x, y, width, 10, frac, settings, signed=False)
-        y += 12
+        y += 10
         y = _text(
             dst,
             18,
@@ -216,7 +217,7 @@ def render_panel(
             y,
             settings.text_dim,
         )
-        y += 4
+        y += 2
 
         # sensors: groups from the single layout in sensors.input_groups
         y = _text(dst, 20, "SENSORS", x, y, settings.text)
@@ -239,8 +240,8 @@ def render_panel(
                     y - 1,
                     settings.text_dim,
                 )
-                y += 8  # stage 13: 9 single-sensor rows + signal group must fit 720px
-        y += 2
+                y += 8  # stage 15: 10 single-sensor rows + signal must fit 720px
+        y += 1
 
         # brain: hidden activations and raw outputs
         y = _text(dst, 20, "BRAIN", x, y, settings.text)
@@ -304,14 +305,18 @@ def render_panel(
             y,
             settings.text,
         )
-        y = _text(
-            dst,
-            18,
-            f"vision {float(g[traits + 2]):.1f}   diet {float(g[traits + 3]):.2f}",
-            x,
-            y,
-            settings.text,
+        # lineage tag (stage 15): hue on the vision/diet line + colour
+        # swatch of the ring, so the traits block keeps its height budget
+        hue = float(g[traits + 4]) % 1.0
+        msg = (
+            f"vision {float(g[traits + 2]):.1f}   "
+            f"diet {float(g[traits + 3]):.2f}   tag {hue:.2f}"
         )
+        y = _text(dst, 18, msg, x, y, settings.text)
+        idx = int(hue * 255.0) & 255
+        swatch = pygame.Surface((12, 12), pygame.SRCALPHA)
+        swatch.fill(tuple(int(v) for v in hue_lut()[idx]))
+        dst.blit(swatch, (x + _font(18).size(msg)[0] + 6, y - 13))
         cid = int(world.creature_id[slot])
         parent = int(world.parent_id[slot])
         cluster = "n/a"
@@ -326,7 +331,7 @@ def render_panel(
             y,
             settings.text_dim,
         )
-        y += 6
+        y += 4
     else:
         y = _text(dst, 26, "NO SELECTION", x, y, settings.text)
         y = _text(dst, 16, "click a creature to inspect its brain", x, y, settings.text_dim)

@@ -13,9 +13,68 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
 - Código, identificadores, comentários, docstrings, mensagens de commit e
   README principal em **inglês**.
 
-## Estado atual do repositório (verificado em 2026-10-11)
-- **Etapa 14 ("feromônio/difusão") implementada, commit pendente de `/cp`:**
-  Jacobi 5 pontos sobre o campo `signal` com wrap toroidal
+## Estado atual do repositório (verificado em 2026-10-12)
+- **Etapa 15 ("tag/cor") concluída, commit pendente de `/cp`:** plano em
+  `.opencode/plans/etapa-15-tag-cor.md` (decisões fechadas pelo usuário:
+  5º traço `tag_hue ∈ [0,1)`, **sem campo no chão**, **1 input** de
+  similaridade lendo vizinhos diretos na janela de cheiro (self-excluded),
+  sprite **mantém matiz=dieta** + **anel fino colorido** sob o sprite +
+  swatch no painel, `FORMAT_VERSION` 6→7 **confirmado**, experimento
+  3 seeds × 10k **confirmado**). **Núcleo:** spawn
+  `genome[traits+4]=rng.uniform(0,1)`; mutação **circular**
+  `h' = h + N(0,trait_std)` com wrap `h − floor(h)`; crossover uniforme
+  (filho herda cor de 1 pai → parente reconhecível); `rebuild_counts`
+  pré-computa `hue_re/hue_im (N,)` (np.cos/sin vetorial) e acumula
+  scratch `cell_tag_re/im (H,W)` (**não salvos**) no `_rebuild_grid`.
+  **Sensor:** `(Σre·own_re + Σim·own_im − 1)·inv_smell ∈ [−1,1]`
+  (sozinho=0, multidão idêntica≈1), índice `3·n_rays+12 = 33`.
+  **Layout: 34 in / 4 out / 494 brain_params / 499 genoma** (limite 500);
+  `N_BODY_TRAITS` 4→5; `sensor_input_dim = n_rays*3+13`.
+  **`FORMAT_VERSION` 6→7** (v1–v6 → ValueError; layout do genoma mudou).
+  **Stats novos:** `hue_mean` (circular), `hue_spread` (1−R; 0=cor única,
+  1=roda uniforme), `tag_sim_mean`, `win_neigh` (= nº de vizinhos na
+  janela = leitura crowd do sensor × cells², reaproveita `sensor_buf`,
+  custo ≈0); `plot.py` intocado. **Render:** `hue_lut()`, anel de 8
+  offsets sob o sprite (pass antes do humanoide, `_scatter_groups`
+  agrupa por cor), painel `tag 0.42` + swatch 12 px na linha vision/diet
+  (gaps de seção trimados p/ caber 720 px — `test_panel_fits_window`
+  ajustado). **Testes: 165 passed** — `tests/test_tag.py` novo (10:
+  spawn/mutação circular+wrap, similaridade exata, layout/input_groups,
+  stats, save v7, determinismo); pins 34/494/499 em `test_brain`/
+  `test_signals`; `test_io` + `test_v5`/`test_v6_save_is_rejected`;
+  fix `test_determinism_with_predation` (layout reshuffled o stream do
+  Numba → vieses de gate `genome[a,b2+2]=20`, `genome[v,b2+2]=−20`,
+  `b2 = hid*in + hid + out*hid`). **Bench pós-mudança** (2 amostras,
+  load 4.3–4.9): **922–1250 / 464–490 / 258–287** a 500/2000/5000 vs
+  baseline 14 (794–1106/465–491/166–303, sessão anterior) → sem
+  regressão, piso 30 @N=2000 com 15×. **Validação sensor** (mundo
+  tick-3000): série direta == `sensor_buf` (maxdiff **0.00e+00**),
+  n̄ vizinhos 0.79 vs 0.06 aleatório. Caches npz de experimentos
+  antigos ficam staleness pelas colunas novas (re-run automático, não
+  bloqueia). Screenshots: `/tmp/opencode/stage15_overview.png` e
+  `stage15_selected.png` (anel + `tag` no painel + `W1 (10x35)`).
+- **Experimento `experiments/tags/` (etapa 15)** — default Config,
+  seeds 42/7/13 × 10k, ~214–253 ticks/s. **HARD GATE PASS** (3/3 vivas;
+  min alive 55/54/141, final 270/469/939, média 178/189/363). **H1
+  deriva neutra ✓:** `hue_spread` final **0.175/0.773/0.796**
+  (semente-dependente, não monotó; banda abre após gargalo ~6500) e
+  `hue_mean` circular circula/abota (wrap visível). **H2 estrutura ✓:**
+  `tag_sim_mean` médio 0.046/0.054/0.042, final **0.150/0.132/0.171**
+  vs nulo_B (posições+cores aleatórias) final ≈0.0005–0.005 e nulo_A
+  (cores aleatórias dado o espaçamento) ≈0.009–0.10. Decomposição:
+  **spacing factor** final **22.4/17.5/9.4** (inicia ≈1.0 ✓; média
+  pós-1k = 17.9/23.1/10.1; pico ~140 no gargalo) e **align ratio**
+  (observado/nulo_A) final **1.5/12.5/18.8**. **H3 não afirmada**
+  (estrutura ≠ uso do sensor; ablação exigiria layout diferente —
+  futuro). Figuras `drift/similarity/pop.png`; README com 5
+  limitações (ratio ruidoso cedo p/ R²≈0; seed42 diluído; nulo_A
+  aprox.; pilot informou H2 — divulgado). `pop.png` saudável (energia
+  30→65–90, sem colapso). README principal: genoma **499** / **34
+  inputs** / **165 testes** / bench 15 / roadmap 1–15 / `tags` na lista
+  de reprodução. **Próximo passo do usuário: `/cp`**, depois planejar
+  a etapa 16 (doação).
+- **Etapa 14 ("feromônio/difusão") concluída, commitada em
+  `origin/master` (`3552e4e`):** Jacobi 5 pontos sobre o campo `signal` com wrap toroidal
   (`new = old + rate·(N+S+E+W−4·old)`), conserva massa por construção e é
   estável só p/ `rate ≤ 0.25` (validado em `__post_init__`). Novo
   `Config.signal_diffuse = 0.1` **ligado por default** (decisão do usuário:
@@ -59,9 +118,8 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   completo (3 amostras, load 3.4–5.6): **794–1106 / 465–491 / 166–303** a
   500/2000/5000 — piso 30 @N=2000 com 15× (faixa 13 era 683–1346/516–861/
   162–516 em load menor; diferença = ruído de carga, share da fase medido
-  no profile). README principal: 153 testes, tabela de bench, roadmap
-  1–14 + nota de reprodutibilidade da 14. Próximo passo do usuário: `/cp`,
-  depois planejar a etapa 15 (tag/cor).
+  no profile). README principal: 153 testes (superado pela atualização
+  da 15), tabela de bench, roadmap 1–14 + nota de reprodutibilidade da 14.
 - **Etapa 13 ("canal de sinais") concluída, commitada em
   `origin/master` (`e0fb14b`):** canal comum escalar **sem recompensa** (princípio 1 intocado): campo
   `signal (H,W) float32` com decaimento geométrico **local** (sem difusão —
@@ -716,6 +774,7 @@ antes de dizer que uma mudança de tick não regrediu desempenho.
 
 Roadmap "mundo real" aprovado (`.opencode/plans/roadmap-mundo-real.md`):
 10 ambiente (terreno/estações/luz) ✓ → 11 biologia (sexualidade/senescência/carniça) ✓
-→ 12 ecologia (ciclos tróficos) ✓ → 13–16 civilização+ (antiga 10–13).
+→ 12 ecologia (ciclos tróficos) ✓ → 13 canal ✓ → 14 difusão ✓ →
+15 tag/cor ✓ → 16 doação + `experiments/proto_culture/`.
 
 Trabalhe **apenas na etapa que o usuário indicar**.
