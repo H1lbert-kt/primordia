@@ -35,6 +35,8 @@ contact reach so neighbour scans stay bounded).
 The child is also born with an empty learned delta (``dw`` row = 0): plastic
 weights are stage-21 lifetime state, never inherited (Baldwin, not
 Lamarck), so genome distance keeps measuring heritable divergence alone.
+The stage-24 bite scars (``stress``, last attacker hue/age) reset the same
+way: a recycled slot never hands its grudge to the creature born into it.
 
 Determinism: the serial kernel draws from the Numba RNG, which is a global
 stream seeded once at ``World`` construction (``seed_numba_rng``). Because the
@@ -101,6 +103,9 @@ def _reproduce(
     inventory: np.ndarray,
     dw: np.ndarray,
     e_last_plastic: np.ndarray,
+    stress: np.ndarray,
+    attacker_hue: np.ndarray,
+    attacker_age: np.ndarray,
     species_id: np.ndarray,
     parent_id: np.ndarray,
     creature_id: np.ndarray,
@@ -130,6 +135,7 @@ def _reproduce(
     next_id: np.int32,
     genealogy_used: np.int32,
     genealogy_overflow: np.int32,
+    no_memory: np.int32,
 ) -> tuple[int, int, int, int, int]:
     """One serial pass: every eligible initiator mates with its nearest partner.
 
@@ -247,10 +253,16 @@ def _reproduce(
         # Wood and learned weights are never inherited: a recycled slot's
         # inventory must not leak into the newborn, and stage-21 dw is
         # lifetime state (Baldwin — crossover passes the blueprint only).
+        # Stage 24: the bite scars (stress, last attacker) are lifetime
+        # state the same way — a recycled slot must not hand its grudge to
+        # the creature born into it.
         inventory[child] = 0.0
         for k in range(dw.shape[1]):
             dw[child, k] = 0.0
         e_last_plastic[child] = child_e  # credit signal starts at birth energy
+        stress[child] = 0.0
+        attacker_hue[child] = 0.0
+        attacker_age[child] = no_memory
 
         for g in range(traits_off):
             if np.random.random() < mutation_rate:

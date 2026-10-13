@@ -22,17 +22,21 @@ pytest -q
 - **No fitness, no objectives.** Energy is the only currency: eat food (or
   meat), pay metabolic and movement costs, and split when you cross
   `reproduce_threshold`. Death = energy ≤ 0, `max_age`, or a predator's bite.
-- **Evolvable body and brain.** Each creature is a genome of 490 values: a
-  35-input network (7-ray food sum, creatures, prey and carrion peak
+- **Evolvable body and brain.** Each creature is a genome of 446 values: a
+  37-input network (7-ray food sum, creatures, prey and carrion peak
   channels, left/right food antennas, internal state, ambient light, three
   signal-field sensors, the hue similarity of neighbours in the smell
-  window, and the wood smell of that same window) → 9 hidden units with
+  window, the wood smell of that same window, and — since stage 24 — two
+  bite scars: accumulated stress and a recency-faded rancor toward the
+  last attacker's hue) → 8 hidden units with
   Elman recurrence → turn, accelerate, eat/attack, emit signal, donate
   energy, gather wood, build a campfire, build a house — plus
   body traits: max speed, size, vision range, *diet* (0 = herbivore;
   predation capability is itself a trait that has to evolve) and a
   heritable lineage hue — neutral by construction (nothing in the tick
-  rewards it), shown as a ring under the sprite.
+  rewards it), shown as a ring under the sprite. The affect inputs are
+  **information, not reward**: the channel is off by default and the
+  experiment that turned it on halved the population (stage 24, below).
 - **Sex and aging, not just cloning.** Reproduction is sexual: an initiator
   above the threshold searches for a nearby partner, each parent pays half
   the child's energy, and the genome is a per-gene crossover plus mutation.
@@ -86,8 +90,13 @@ limitations in each experiment's README.
 > adds one mutation draw at birth), which shifts the shared Numba RNG
 > stream — so even `off` reruns on current HEAD may produce different
 > trajectories and numbers than stage-19/20 caches. Bit-exact
-> reproduction of old figures still needs the old commit. The
-> experiment
+> reproduction of old figures still needs the old commit. Stages 22–23
+> kept the v10 layout (incremental houses and the off-tick group
+> observer are Config/scratch changes only); stage 24 bumped the layout
+> once more — the affect pair (stress + grudge) appended two inputs
+> (37 in), and the budget forced hidden 9 → 8, so the genome *shrank*
+> 491 → 446 (`FORMAT_VERSION 11`; the affect scratches themselves are
+> lifetime state and stay out of the save). The experiment
 > scripts pin the old regime
 > off via `STAGE8_BASE` so the *regime* is preserved — but reruns on current
 > HEAD use the sexual dynamics; the original asexual runs stay in each
@@ -316,7 +325,7 @@ primordia/
   database.py # stage-19 SQLite world store (daemon checkpoints + timeline)
   observer.py # stage-23 hue-group observer (frontiers/events, off-tick)
   render/     # pygame viewer + headless GIF recorder (never imported by core)
-tests/        # 275 tests: determinism, invariants, save/load, guards
+tests/        # 289 tests: determinism, invariants, save/load, guards
 experiments/  # one script + README per experiment
 run.py        # CLI: --seed --headless --ticks --load --save --stats
               #      --config --record --screenshot --select
@@ -383,9 +392,17 @@ groups in 3/3 seeds and holds them for 2–5k ticks with 4× fewer fusions
 than the free run, but mutation drifts both variants to ~9 hue bands by
 10k, so founding buys coherence for a while, not forever — honest null
 on permanent countries, in `experiments/groups/`, with a `g` toggle for
-the group overlay in the viewer). The "real world"
-roadmap continues with territory (stage 20, still pending — skipped
-ahead to Oja by choice) and the planned stress/rancor stage (24). Known open
+the group overlay in the viewer), and the affect channel (stage 24: two
+new inputs carrying lifetime bite scars — accumulated stress and a
+recency-faded rancor toward the attacker's hue — with an off-switch so
+the pre-stage-24 default world still reads zeros; on the proto-culture
+world the channel is *causally read* (bit-identical until the first
+bite, then divergent) and even cuts predation deaths in 2/3 seeds, but
+halves the population in 3/3 — HARD GATE FAIL, default stays off,
+in `experiments/affect/`). The "real world"
+roadmap continues with territory (stage 25, revised: physical deposits,
+viewer overlay off by default — the old stage-20 sketch is absorbed).
+Known open
 problems are documented above (predation still a trickle, creatures still
 circle) rather than hidden.
 

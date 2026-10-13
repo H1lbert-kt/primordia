@@ -23,14 +23,26 @@ Input vector layout (``Config.sensor_input_dim`` floats, written into
                              cross-product split as the food antennas, so a
                              creature can steer toward or away from a call
     [3n+12 : 3n+13)          tag (stage 15): hue similarity of the neighbours —
-                             dot of the window's summed (cos, sin) hue vectors
-                             (self removed) with the creature's own unit
-                             vector / cells: +1 = everyone here shares my
-                             colour, ~0 = alone or unaligned, <0 = opposite
+                              dot of the window's summed (cos, sin) hue vectors
+                              (self removed) with the creature's own unit
+                              vector / cells: +1 = everyone here shares my
+                              colour, ~0 = alone or unaligned, <0 = opposite
     [3n+13 : 3n+14)          wood (stage 17): smell of the wood field in the
-                             same window / (wood_capacity * cells), the
-                             information the gather gate needs to discover
-                             harvesting at all
+                              same window / (wood_capacity * cells), the
+                              information the gather gate needs to discover
+                              harvesting at all
+    [3n+14 : 3n+15)          stress (stage 24): min(bite scar, stress_scale) /
+                              stress_scale in [0, 1] — how much landed damage
+                              this creature is still carrying, faded by
+                              exp(-stress_decay) each tick. Exact 0 without
+                              affect_enabled or before the first bite.
+    [3n+15 : 3n+16)          grudge (stage 24): circular hue similarity to the
+                              last attacker, cos(2*pi*(hue_me - hue_them)),
+                              faded by exp(-grudge_decay * ticks since the
+                              bite): +1 = a creature of my own colour hit me
+                              recently, -1 = the opposite colour, 0 = no
+                              memory (never bitten, or the recency decayed).
+                              Information only — no scoreboard, no reward.
 
 Rays march in steps of one cell up to the creature's ``vision_range`` body
 trait times the current light level ``L(t)`` (seeing in the dark is seeing
@@ -52,6 +64,7 @@ import numpy as np
 from numba import njit, prange
 
 from .config import Config
+from .world import NO_MEMORY
 
 
 def input_groups(config: Config) -> tuple[tuple[str, slice | np.ndarray], ...]:
@@ -79,6 +92,8 @@ def input_groups(config: Config) -> tuple[tuple[str, slice | np.ndarray], ...]:
         ("signal", slice(smell + 9, smell + 12)),
         ("tag", slice(smell + 12, smell + 13)),
         ("smell wood", slice(smell + 13, smell + 14)),
+        ("stress", slice(smell + 14, smell + 15)),
+        ("grudge", slice(smell + 15, smell + 16)),
     )
 
 
@@ -119,11 +134,19 @@ def perceive(
     signal_capacity: np.float32,
     wood_capacity: np.float32,
     senescence_rate: np.float32,
+    stress: np.ndarray,
+    attacker_hue: np.ndarray,
+    attacker_age: np.ndarray,
+    stress_scale: np.float32,
+    grudge_decay: np.float32,
+    affect_enabled: bool,
 ) -> None:
     """Fill ``sensor_buf[i]`` for every living creature (parallel over slots)."""
     inv_cap = np.float32(1.0) / food_capacity
     inv_e = np.float32(1.0) / energy_scale
     inv_wood = np.float32(1.0) / wood_capacity
+    inv_scale = np.float32(1.0) / stress_scale
+    inv_two_pi = np.float32(2.0 * np.pi)
     smell_side = 2 * smell_r + 1
     inv_smell = np.float32(1.0) / (smell_side * smell_side)
     inv_side = np.float32(2.0) * inv_smell  # antennas see ~half the window
@@ -290,3 +313,27 @@ def perceive(
         # wood smell (stage 17): window sum normalized by capacity * cells,
         # in [0, 1] for a full window of maxed-out cells (gather's input)
         sensor_buf[i, base + 13] = swood * inv_wood * inv_smell
+
+        # affect (stage 24): the bite scar and the recency-faded hue
+        # similarity to the last attacker. Off (default) writes exact
+        # zeros, keeping the forward pass independent of the scratches.
+        # NO_MEMORY slots read an exact zero even at grudge_decay = 0
+        # (the degenerate "perfect memory" setting must not invent a
+        # phantom attacker at hue 0).
+        if affect_enabled:
+            s = stress[i] * inv_scale
+            if s > 1.0:
+                s = np.float32(1.0)
+            sensor_buf[i, base + 14] = s
+            if attacker_age[i] < NO_MEMORY:
+                g = np.cos(
+                    inv_two_pi * (genome[i, traits_off + 4] - attacker_hue[i])
+                )
+                sensor_buf[i, base + 15] = g * np.exp(
+                    -grudge_decay * np.float32(attacker_age[i])
+                )
+            else:
+                sensor_buf[i, base + 15] = 0.0
+        else:
+            sensor_buf[i, base + 14] = 0.0
+            sensor_buf[i, base + 15] = 0.0

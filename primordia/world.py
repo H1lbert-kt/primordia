@@ -41,6 +41,10 @@ never resized. Array dtypes are part of the module contract:
                                        # (Baldwin — the genome stays immutable in life)
     e_last_plastic (N,) float32,       # energy at the previous tick, credit signal
                                        # for the stage-21 delta-E ablation (saved)
+    stress (N,) float32,               # stage-24 bite scar: landed damage, decays,
+                                       # zeroed at birth, NOT inherited, NOT saved
+    attacker_hue (N,) float32,         # stage-24 tag_hue of the last attacker
+    attacker_age (N,) int32,           # ticks since that bite (NO_MEMORY = never)
     actions (N, 8) float32   # scratch buffers, zeroed once, reused every tick
 
 ``creature_id`` is a monotonic birth id (``next_id`` counts up); dead slots
@@ -65,6 +69,12 @@ from numba import njit
 
 from .config import Config
 from .genome import seed_numba_rng
+
+#: Sentinel age (ticks since the last bite) meaning "never bitten": large
+#: enough that exp(-grudge_decay * NO_MEMORY) underflows to an exact 0.0 in
+#: float32 for any sane grudge_decay, so the grudge input reads zero without
+#: a branch. Stage 24.
+NO_MEMORY = 1_000_000
 
 
 @njit(cache=True)
@@ -393,6 +403,20 @@ class World:
         # lines from it, so recording stays bit-identical to headless.
         # Diagnostic scratch, not saved (io.py), like bite_by_diet.
         self.donate_to = np.full(config.max_creatures, -1, dtype=np.int32)
+        # Affect scratches (stage 24): what a bite leaves on the victim.
+        # ``stress`` accumulates the landed energy of every bite and decays
+        # exponentially each tick; ``attacker_hue`` is the tag_hue of the
+        # last creature that landed a bite; ``attacker_age`` counts ticks
+        # since that bite (init at NO_MEMORY so the grudge input is an exact
+        # zero until the first bite). Lifetime state like dw: zeroed at
+        # birth, NOT inherited, NOT saved (io.py) — a resumed run restarts
+        # with clean scratches, which only matters while a bite is fresh
+        # (< ~500 ticks at the default grudge_decay).
+        self.stress = np.zeros(config.max_creatures, dtype=np.float32)
+        self.attacker_hue = np.zeros(config.max_creatures, dtype=np.float32)
+        self.attacker_age = np.full(
+            config.max_creatures, NO_MEMORY, dtype=np.int32
+        )
 
         # Genealogy (stage 7): birth-id allocator plus the pre-allocated
         # birth log; _reproduce writes rows through the cursor in-place.

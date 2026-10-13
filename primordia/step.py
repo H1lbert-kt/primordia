@@ -81,6 +81,8 @@ genome.py); it is never touched by prange or by bite.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 from numba import njit, prange
 
@@ -89,7 +91,7 @@ from .cycles import growth_multiplier, light_level
 from .ecology import HERB_MAX, PRED_MIN
 from .genome import _reproduce
 from .sensors import perceive
-from .world import World
+from .world import NO_MEMORY, World
 
 
 @njit(cache=True, parallel=True)
@@ -911,6 +913,14 @@ def phase_perceive(world: World) -> None:
     # ambient light (stage 10): shortens rays at night and feeds the
     # "light" input; same pure formula the renderer reads
     light = light_level(cfg, world.tick)
+    # stage 24 affect decay, vectorized over all slots (dead slots are
+    # reset at birth anyway): stress *= exp(-decay) once per tick, and the
+    # grudge recency clock ticks forward. Applied every tick regardless of
+    # affect_enabled — the scratches are cheap bookkeeping; the off-switch
+    # only gates what perceive hands the brain.
+    if cfg.stress_decay > 0.0:
+        world.stress *= np.float32(math.exp(-cfg.stress_decay))
+    world.attacker_age += 1
     perceive(
         world.pos,
         world.angle,
@@ -947,6 +957,12 @@ def phase_perceive(world: World) -> None:
         np.float32(cfg.signal_capacity),
         np.float32(cfg.wood_capacity),
         np.float32(cfg.senescence_rate),
+        world.stress,
+        world.attacker_hue,
+        world.attacker_age,
+        np.float32(cfg.stress_scale),
+        np.float32(cfg.grudge_decay),
+        cfg.affect_enabled,
     )
 
 
@@ -1202,6 +1218,9 @@ def _bite(
     pred_min: np.float32,
     cover: np.ndarray,
     cover_reduction: np.float32,
+    stress: np.ndarray,
+    attacker_hue: np.ndarray,
+    attacker_age: np.ndarray,
 ) -> tuple[int, int]:
     """Serial contact predation: gate * diet budget drains neighbours.
 
@@ -1226,6 +1245,14 @@ def _bite(
     (stage 12.5 measurement: ``bite_by_diet[herb/omn/pred] += 1``, buckets
     from ``ecology.HERB_MAX``/``PRED_MIN``) — a counter the tick never
     reads, so trajectories are unchanged.
+
+    Stage 24 (affect): every landed bite also fills the victim's lifetime
+    scratches — ``stress += land``, ``attacker_hue = the attacker's
+    tag_hue``, ``attacker_age = 0``. Written unconditionally (O(1) per
+    bite, no branch): whether the brain ever *reads* them is
+    ``Config.affect_enabled``'s job in ``perceive``. A victim killed by
+    this bite keeps its scars into the free-list; the next creature born
+    into the slot is reset by ``_reproduce``.
 
     Slot order is fixed and no random numbers are drawn, so the outcome is
     deterministic. Returns ``(free_count, deaths_predation)``.
@@ -1298,6 +1325,11 @@ def _bite(
                     bite_by_diet[bucket] = bite_by_diet[bucket] + 1
                     energy[j] = energy[j] - land
                     energy[i] = energy[i] + bite_efficiency * land
+                    # stage 24 affect: the scar this blow leaves on the
+                    # victim (survivor or corpse — the next birth resets it)
+                    stress[j] = stress[j] + land
+                    attacker_hue[j] = genome[i, traits_off + 4]
+                    attacker_age[j] = 0
                     # the dissipating share lands as carrion on the victim cell
                     meat[iy, ix] = (
                         meat[iy, ix] + carrion_yield * (np.float32(1.0) - bite_efficiency) * land
@@ -1359,6 +1391,9 @@ def phase_bite(world: World) -> None:
         np.float32(PRED_MIN),
         world.cover,
         np.float32(cfg.cover_reduction),
+        world.stress,
+        world.attacker_hue,
+        world.attacker_age,
     )
     world.free_count = int(free_count)
     world.deaths_predation += int(n_pred)
@@ -1409,6 +1444,9 @@ def phase_reproduce(world: World) -> None:
         world.inventory,
         world.dw,
         world.e_last_plastic,
+        world.stress,
+        world.attacker_hue,
+        world.attacker_age,
         world.species_id,
         world.parent_id,
         world.creature_id,
@@ -1438,6 +1476,7 @@ def phase_reproduce(world: World) -> None:
         np.int32(world.next_id),
         np.int32(world.genealogy_used),
         np.int32(world.genealogy_overflow),
+        np.int32(NO_MEMORY),
     )
     world.free_count = int(free_count)
     world.births += int(births)

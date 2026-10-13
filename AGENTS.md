@@ -14,8 +14,51 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   README principal em **inglês**.
 
 ## Estado atual do repositório (verificado em 2026-10-13)
-- **Etapa 23 ("observador de grupos + cenário fundador") concluída
-  (código + testes + bench + experimento; commit pendente de `/cp`):**
+- **Etapa 24 ("estresse+rancor") concluída (código + testes + bench +
+  experimento; commit pendente de `/cp`):** plano em
+  `.opencode/plans/etapa-24-estados-afetivos.md` (**números corrigidos
+  no chat: 37 in + hidden 8 → brain 440, genoma 446, plástico 360 — o
+  arquivo do plano ainda diz 448/454, stale**). **Núcleo:** dois inputs
+  novos no fim do sensor (`3n+14` stress, `3n+15` grudge) lendo
+  scratches de vida inteira preenchidos em `_bite` (`stress[j] += land`,
+  `attacker_hue[j] = hue do atacante`, `attacker_age[j] = 0` —
+  escrita **incondicional**, O(1), mesmo com o canal off) e decaídos
+  no topo de `phase_perceive` (`stress *= exp(−stress_decay)`,
+  `attacker_age += 1`). Stress = `min(scar, stress_scale)/scale`;
+  grudge = similaridade circular de hue com o último atacante ×
+  `exp(−grudge_decay·idade)`; `NO_MEMORY=1_000_000` (world.py) zera o
+  grudge por underflow com guarda explícita. `Config.affect_enabled=
+  False` (default) força os dois inputs a 0 — forward do default
+  bit-idêntico dentro da versão nova; os scratches são lifetime state
+  e **não salvos** (padrão `donate_to`). Birth reseta os 3 scratches
+  do slot reciclado. **Hidden 9→8** (503 params > orçamento 500).
+  **`FORMAT_VERSION` 10→11** (v10 rejeitado com mensagem clara).
+  **Testes: 289 passed** — `tests/test_affect.py` (13: pins 37/8/440/
+  446/360, validações, cobertura de `input_groups`, fills do `_bite`,
+  decaimento/freeze, grudge +1/−1/NO_MEMORY/recência, off=inputs 0
+  mesmo com scratchs sujos, birth reset, determinismo 500 tks,
+  save/load v11 com scratchs limpos + continuação bit-idêntica) +
+  pins atualizados em brain/civilization/donation/signals/panel/tag +
+  `test_v10_save_is_rejected_clearly` em test_io. **Bench:
+  302/194/207 t/s** a 500/2000/5000 (piso 30 @N=2000 com ~6.5×;
+  `alive_final` 124/725/1073 ≠ E23, esperado — layout muda o stream
+  do Numba no spawn). **Experimento `experiments/affect/`**
+  (proto_culture, off vs on, seeds 42/7/13 × 10k, pré-registrado;
+  `data/` gitignored): **HARD GATE FAIL 3/3** — pops finais
+  571/625/164 (off) vs 206/450/32 (on), razões 0.36/0.72/0.20, mas
+  **canal causalmente lido** (trajetórias idênticas até a 1ª mordida,
+  tick ~1300–3600, e divergem depois; mesma seed, mesmo stream de
+  spawn) e `deaths_predation` cai 296→83 e 22→0 em 2/3 seeds —
+  estresse ensina fuga, mas o preço comportamental > mordida
+  evitada. `stress_var` pico 300/141, `grudge_frac` pico 0.69–0.93.
+  Default continua off; README do experimento com 6 limitações
+  (n=3, stress+grudge casados, um mundo, preços não swept, caos
+  tardio, min-alive do controle seed13 já <30). README principal:
+  446/37/289 testes, roadmap 1–19+21+22+23+24, bloco de
+  reprodutibilidade com o bump v11. **Próximo passo: `/cp`**, depois
+  etapa 25 (território revisado).
+- **Etapa 23 ("observador de grupos + cenário fundador") concluída e
+  commitada (`4e2eb44` em origin/master):**
   planos em `.opencode/plans/etapa-23-observador-cenario.md`,
   `etapa-24-estados-afetivos.md`, `etapa-25-territorio-revisado.md`
   (3 etapas aprovadas em lote pelo usuário; §5 fecha hidden 9→8/37
@@ -56,10 +99,10 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   [44,152] vs 149 [61,210]; invasões raras (0–8, só em densidade alta);
   pops 1437 vs 1236 (trajetória, não tratamento). README do experimento
   com 6 limitações; README principal: layout `observer.py`, 275 testes,
-  comando `groups`, roadmap 1–19+21+22+23. **Próximo passo: etapa 24**
-  (estresse+rancor: scratchs `stress`/`attacker_hue`+`attacker_age`,
-  35→37 inputs, hidden 9→8 → genoma 454, `FORMAT_VERSION` 10→11,
-  `experiments/affect/`), depois 25 (território revisado).
+  comando `groups`, roadmap 1–19+21+22+23. **Próximo passo executado:
+  etapa 24** (ver entrada acima; nota: o plano citava genoma 454, mas
+  37 in + hidden 8 = brain 440 / genoma 446 — hidden 9 custaria 503,
+  acima do orçamento 500).
 - **Etapa 22 ("casas incrementais") concluída e commitada (`a55f134`):**
   plano em `.opencode/plans/etapa-22-casas-incrementais.md`. **Núcleo:**
   `struct_store` passa a guardar a completude `u∈[0,1]` das casas (fires
@@ -1128,9 +1171,12 @@ Roadmap "mundo real" aprovado (`.opencode/plans/roadmap-mundo-real.md`):
 18 balanceamento dos defaults ✓ → 19 daemon+SQLite ✓ →
 21 plasticidade/Oja ✓ → 22 casas incrementais ✓ (nulo publicado,
 default off; `a55f134`) → 23 observador de grupos + cenário fundador ✓
-(nulo publicável; commit pendente de `/cp`) → 24 estados afetivos
-(estresse+rancor, hidden 9→8, genoma 454, `FORMAT_VERSION` 10→11) →
+(nulo publicável; commitada `4e2eb44`) → 24 estados afetivos
+(estresse+rancor ✓ — hidden 9→8, 37 in, brain 440, genoma 446,
+`FORMAT_VERSION` 10→11, HARD GATE FAIL publicado, default off; commit
+pendente de `/cp`) →
 25 território revisado (absorve a antiga etapa 20; `struct_deposit`).
-**Próximo passo:** etapa 24 (a decidir pelo usuário / executar sob pedido).
+**Próximo passo:** `/cp` da etapa 24, depois etapa 25 (a decidir pelo
+usuário / executar sob pedido).
 
 Trabalhe **apenas na etapa que o usuário indicar**.

@@ -97,9 +97,12 @@ class Config:
     smell_radius_cells: int = 1  # (2r+1)^2 cells sensed around the creature
 
     # --- brain ---
-    # 9 keeps brain_params at 485 (35 inputs + 8 outputs + W_rec), inside
-    # the 100-500 parameter budget; 10 would push it to 534, over budget.
-    hidden_size: int = 9
+    # Stage 24: 37 inputs (the affect pair stress/grudge appended) fit the
+    # 100-500 budget only at hidden 8 — brain_params = 8*38 + 8*9 + 8*8 =
+    # 440, genome = 446. Hidden 9 would cost 9*38 + 8*10 + 9*9 = 503, over
+    # budget; the 11% capacity cut (W_rec 81 -> 64) is the price of the two
+    # new senses.
+    hidden_size: int = 8
     weight_init_std: float = 0.5  # std of N(0, std) weights drawn at spawn
 
     # --- locomotion (cinematic: vel = dir(angle) * max_speed * accel) ---
@@ -333,6 +336,33 @@ class Config:
     plasticity_credit: bool = False
     plasticity_credit_strength: float = 1.0
 
+    # --- affect (stage 24: stress + grudge as pure information, no reward) ---
+    # Being bitten fills two lifetime scratches the brain can read (stage-24
+    # inputs 35/36): ``stress`` accumulates the landed energy and decays
+    # exponentially; ``grudge`` is the circular hue similarity to the last
+    # attacker faded by how long ago the bite was. Neither is inherited,
+    # neither is saved (lifetime state, zeroed at birth like dw). There is
+    # NO punishment/reward wiring: if fleeing or vengeance never pays for
+    # itself in energy, the channel stays silent and the experiment reports
+    # a null — that is the honest outcome, same contract as stage 16's
+    # donation and stage 21's plasticity.
+    # Default off: the pre-stage-24 default world is the baseline every
+    # older experiment measured against (forward skips the two inputs,
+    # they stay exact zeros). The stage-24 experiment turns it on.
+    affect_enabled: bool = False
+    # Per-tick multiplicative decay of the stress scratch: remaining stress
+    # *= exp(-stress_decay). 0 = a bite scar never fades (documented
+    # degenerate case; the input then only grows).
+    stress_decay: float = 0.02
+    # Normalizer of the stress input: min(stress, scale) / scale in [0, 1].
+    # A full initial_energy (50) bite = stress 50 saturates any scale <= 50.
+    stress_scale: float = 1.0
+    # Per-tick decay of the grudge recency factor exp(-grudge_decay * ticks
+    # since the bite). 0 = the last attacker is remembered perfectly forever
+    # (the other degenerate case). Hue similarity is a physical fact of the
+    # tag (stage 15): the brain sees who hit it, not a scoreboard.
+    grudge_decay: float = 0.01
+
     def __post_init__(self) -> None:
         if self.width <= 0.0 or self.height <= 0.0:
             raise ValueError("world dimensions must be positive")
@@ -503,6 +533,12 @@ class Config:
             raise ValueError("plasticity_eta_std must be >= 0")
         if self.plasticity_credit_strength < 0.0:
             raise ValueError("plasticity_credit_strength must be >= 0")
+        if self.stress_decay < 0.0:
+            raise ValueError("stress_decay must be >= 0")
+        if self.stress_scale <= 0.0:
+            raise ValueError("stress_scale must be positive")
+        if self.grudge_decay < 0.0:
+            raise ValueError("grudge_decay must be >= 0")
 
     @property
     def grid_shape(self) -> tuple[int, int]:
@@ -519,10 +555,12 @@ class Config:
         (left/right of heading), 3 internal sensors (energy, speed,
         ambient light — stage 10's circadian cue), 3 signal slots (smell +
         left/right antennas over the signal field, stage 13), 1 tag slot
-        (hue similarity of the neighbours, stage 15) and, since stage 17,
-        1 wood slot (smell of the wood field — without it the gather gate
-        would have nothing to react to)."""
-        return self.n_rays * 3 + 14
+        (hue similarity of the neighbours, stage 15), 1 wood slot (smell of
+        the wood field — stage 17) and, since stage 24, the affect pair
+        (stress, grudge): the victim's accumulated bite damage faded by
+        decay, and the hue similarity to its last attacker faded by
+        recency. Both are lifetime scratches, never inherited or saved."""
+        return self.n_rays * 3 + 16
 
     @property
     def brain_params(self) -> int:

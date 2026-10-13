@@ -230,7 +230,7 @@ def test_panel_shows_all_gates_and_w2_layout(ready_world: World) -> None:
     for label in ("gate", "emit", "don", "gather", "fire", "house"):
         assert label in messages, f"output {label!r} missing from the panel"
     assert "+0.50" in messages, "gate must be shown decoded, not sigmoid(x) again"
-    assert any("W2|b2 (8x10)" in m for m in messages), messages
-    assert any("W_rec (9x9)" in m for m in messages), messages
+    assert any("W2|b2 (8x9)" in m for m in messages), messages
+    assert any("W_rec (8x8)" in m for m in messages), messages
     assert any("wood " in m and "energy" in m for m in messages), "inventory line"
     assert any("fire " in m and "house " in m for m in messages), "structure counts"

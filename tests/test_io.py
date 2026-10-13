@@ -228,6 +228,16 @@ def test_v9_save_is_rejected_clearly(tmp_path: Path) -> None:
         load_world(str(path))
 
 
+def test_v10_save_is_rejected_clearly(tmp_path: Path) -> None:
+    """Pre-stage-24 saves have a 491-column genome, 9-wide hidden_prev and
+    396-column dw (the old brain layout); the gate must reject before any
+    shape mismatch (stage 24 layout bump)."""
+    path = tmp_path / "old.npz"
+    np.savez(path, format_version=np.int32(10))
+    with pytest.raises(ValueError, match="format"):
+        load_world(str(path))
+
+
 def test_numba_rng_state_helpers_roundtrip() -> None:
     """Guard: numba._helperlib must keep exposing the stream (see genome.py)."""
 

@@ -1,6 +1,6 @@
 """Save and load the entire world as a versioned ``.npz`` (stage 7).
 
-Format v10 stores exactly what is needed to continue a run bit-for bit
+Format v11 stores exactly what is needed to continue a run bit-for bit
 (v2 added ``food_field`` and ``hidden_prev``; v3 adds ``terrain``, the
 stage-10 geography; v4 adds ``meat`` and ``meat_eaten``, the stage-11
 carrion cycle; v5 widens the genealogy log to 4 columns so both parents
@@ -14,8 +14,10 @@ owner, alive mask and free-list) plus the ``wood_gathered`` /
 8-output layout; v10 is a layout bump for stage-21 plasticity — the genome
 grows to 491 columns with the evolvable-eta trait, ``dw`` (the Oja delta,
 never inherited but required to continue learning bit-for bit) and
-``e_last_plastic`` (the delta-E credit signal) join the payload; readers
-reject older versions with a clear message):
+``e_last_plastic`` (the delta-E credit signal) join the payload; v11 is
+the stage-24 layout bump — the brain is 37 inputs at hidden 8, so the
+genome shrinks to 446 columns, ``hidden_prev`` to 8 wide and ``dw`` to
+360; readers reject older versions with a clear message):
 
     format_version  int32 scalar; readers reject other versions
     config_json     Config as JSON (rebuilds every balance parameter)
@@ -48,8 +50,12 @@ persistent Elman state), ``cell_*`` grids (rebuilt as phase
 0 of every ``advance``, and again by ``load_world`` so grids are valid even
 before the first tick), the stage-17 structure scratch
 (``struct_grid``/``struct_fire``/``fire_heat``/``cover`` — rebuilt by
-``World.rebuild_struct_fields``, also called on load) and
-``ray_unit``/``cell_w``/``cell_h`` (derived from Config).
+``World.rebuild_struct_fields``, also called on load),
+``ray_unit``/``cell_w``/``cell_h`` (derived from Config) and the stage-24
+affect scratches (``stress``/``attacker_hue``/``attacker_age`` — lifetime
+bite scars like ``dw``: a resumed run restarts with clean scratches,
+which only matters while a bite is fresh, a few hundred ticks at the
+default ``grudge_decay``).
 
 The Numba RNG stream is process-global: ``save_world`` must be called while
 the world being saved is the active stream — the same "advance worlds
@@ -70,7 +76,12 @@ from .config import Config
 from .genome import get_numba_rng_state, set_numba_rng_state
 from .world import World
 
-FORMAT_VERSION = 10
+# v11 (stage 24): the brain layout changed (37 inputs, hidden 8), so the
+# saved genome (N, 446), hidden_prev (N, 8) and dw (N, 360) have new shapes
+# and old files cannot be reshaped safely. The stage-24 affect scratches
+# (stress / attacker_hue / attacker_age) are lifetime state and stay out of
+# the save, like bite_by_diet and donate_to.
+FORMAT_VERSION = 11
 
 _INT_SCALARS = (
     "seed",
@@ -125,7 +136,7 @@ _ARRAYS = (
 
 
 def save_world(world: World, path: str | BinaryIO) -> None:
-    """Write the full simulation state as npz (format v10).
+    """Write the full simulation state as npz (format v11).
 
     ``path`` is a filesystem path or any binary file-like object (the
     stage-19 daemon serializes checkpoints into a SQLite BLOB via

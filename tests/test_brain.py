@@ -29,14 +29,15 @@ def offsets(cfg: Config) -> tuple[int, int, int, int, int]:
 
 def test_genome_layout() -> None:
     cfg = Config()
-    # 7*3 rays + 4 smell + 2 antennas + 3 internal + 3 signal + 1 tag + 1 wood
-    assert cfg.sensor_input_dim == 35
-    assert cfg.hidden_size == 9
-    assert cfg.brain_params == 485  # 9*36 + 8*10 + 9*9 (W1, W2, W_rec)
+    # 7*3 rays + 4 smell + 2 antennas + 3 internal + 3 signal + 1 tag +
+    # 1 wood + stress + grudge (stage 24)
+    assert cfg.sensor_input_dim == 37
+    assert cfg.hidden_size == 8
+    assert cfg.brain_params == 440  # 8*38 + 8*9 + 8*8 (W1, W2, W_rec)
     assert 100 <= cfg.brain_params <= 500
     # 6 body traits since stage 21: + plasticity eta
-    assert cfg.genome_size == cfg.brain_params + Config.N_BODY_TRAITS == 491
-    assert cfg.plastic_params == 9 * 35 + 9 * 9  # W1 + W_rec blocks of dw
+    assert cfg.genome_size == cfg.brain_params + Config.N_BODY_TRAITS == 446
+    assert cfg.plastic_params == 8 * 37 + 8 * 8  # W1 + W_rec blocks of dw
 
     _w1, _b1, _w2, b2, wrec = offsets(cfg)
     assert b2 + Config.N_OUTPUTS == wrec
@@ -61,7 +62,7 @@ def test_genome_layout() -> None:
 
 
 def test_forward_hand_computed() -> None:
-    cfg = Config(n_rays=1, hidden_size=2)  # input_dim 15, params 48
+    cfg = Config(n_rays=1, hidden_size=2)  # input_dim 19, params 62
     w = World(cfg, seed=1)
     slot = first_alive(w)
     _w1, _b1, w2, _b2, _wrec = offsets(cfg)
