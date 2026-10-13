@@ -48,6 +48,11 @@ class Hud:
     # first frames). species_k is the cluster count for the HUD line.
     species_k: int | None = None
     cluster_label_of_slot: np.ndarray | None = None  # label per slot, -1 dead
+    # Stage 23: observer groups (hue countries). None = no cache yet.
+    groups_k: int | None = None
+    border_cells: int | None = None
+    group_uid_of_slot: np.ndarray | None = None  # uid per slot, -1 outside
+    group_info: dict[int, tuple[int, int, int]] | None = None  # uid -> pop/area/age
 
 
 def _text(dst: pygame.Surface, size: int, msg: str, x: int, y: int, color) -> int:
@@ -339,6 +344,17 @@ def render_panel(
             y,
             settings.text_dim,
         )
+        # stage 23: the creature's observer group (hue country), if cached
+        if hud.group_uid_of_slot is not None:
+            guid = int(hud.group_uid_of_slot[slot])
+            if guid >= 0:
+                info = (hud.group_info or {}).get(guid)
+                if info is not None:
+                    pop, area, age = info
+                    msg = f"group #{guid}  pop {pop}  area {area}  age {age}"
+                else:
+                    msg = f"group #{guid}"
+                y = _text(dst, 16, msg, x, y, settings.text_dim)
         y += 4
     else:
         y = _text(dst, 26, "NO SELECTION", x, y, settings.text)
@@ -370,6 +386,10 @@ def render_panel(
     )
     for line in stats:
         y = _text(dst, 16, line, x, y, settings.text)
+    if hud.groups_k is not None:
+        # stage 23: observer country gauges (only while the app has a cache)
+        bd = hud.border_cells if hud.border_cells is not None else 0
+        y = _text(dst, 16, f"groups {hud.groups_k}   borders {bd}", x, y, settings.text)
     y += 4
 
     if not selected:
@@ -396,7 +416,26 @@ def render_panel(
         "keys: space pause  . step",
         "1-4 / +-  sim speed",
         "wheel zoom  drag pan  click select",
-        "esc clear   f follow",
+        "esc clear  f follow  g groups",
     ):
         _text(dst, 16, line, x, y, settings.text_dim)
         y += 13
+
+
+def draw_event_log(dst: pygame.Surface, events, settings: Settings) -> None:
+    """Recent observer group events in the viewport's bottom-left corner.
+
+    Only drawn while the stage-23 overlay is on: the log is observer output
+    (geometric conventions, see ``primordia.observer``), never world state.
+    ``events`` is the observer's deque (oldest first); we show the newest
+    ``settings.group_event_log`` lines.
+    """
+    if not events:
+        return
+    recent = list(events)[-settings.group_event_log :]
+    x, y = 8, dst.get_height() - 14 * len(recent) - 8
+    for ev in recent:
+        tail = f" g{ev.other}" if ev.other >= 0 else ""
+        msg = f"t{ev.tick}  {ev.kind}  g{ev.group}{tail}"
+        _text(dst, 15, msg, x, y, settings.text_dim)
+        y += 14

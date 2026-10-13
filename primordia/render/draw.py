@@ -279,17 +279,21 @@ def draw_world(
     buffers: FrameBuffers,
     meat_color: tuple[int, int, int] = (140, 40, 36),
     signal_color: tuple[int, int, int] = (150, 90, 220),
+    group_rgb: np.ndarray | None = None,
+    group_alpha: np.ndarray | None = None,
 ) -> None:
-    """Write terrain + wood + food + carrion + signal into ``pixels``.
+    """Write terrain + wood + food + carrion + signal (+ groups) into ``pixels``.
 
-    Per cell: ``rgb = lerp(lerp(lerp(lerp(terrain, wood, a_w), food, a_f),
-    meat, a_m), signal, a_s) * light`` with ``a_w = wood / wood_capacity``
-    (stage 17 — the brown litter sits over the ground and under the food,
-    so harvesting reveals it the way depletion reveals terrain), then
-    ``a_f = food / capacity``, ``a_m = clip(meat / capacity, 0, 1)`` and
-    ``a_s = clip(signal / signal_capacity, 0, 1)``. The blend runs on the
-    200x200 cell grid once per frame; the viewport step is the same single
-    gather as before.
+    Per cell: ``rgb = lerp(lerp(lerp(lerp(lerp(terrain, wood, a_w), food, a_f),
+    meat, a_m), signal, a_s), group, a_g) * light`` with ``a_w = wood /
+    wood_capacity`` (stage 17 — the brown litter sits over the ground and
+    under the food, so harvesting reveals it the way depletion reveals
+    terrain), then ``a_f = food / capacity``, ``a_m = clip(meat / capacity,
+    0, 1)``, ``a_s = clip(signal / signal_capacity, 0, 1)`` and, when the
+    stage-23 observer overlay is on, the precomputed country fill
+    ``group_rgb`` with per-cell ``group_alpha`` (both None = the exact
+    pre-stage-23 path). The blend runs on the 200x200 cell grid once per
+    frame; the viewport step is the same single gather as before.
     """
     cap = float(world.config.food_capacity)
     f_idx = np.clip(world.food * (255.0 / cap), 0.0, 255.0).astype(np.intp)
@@ -310,6 +314,8 @@ def draw_world(
     sig_a = np.clip(world.signal * np.float32(1.0 / sig_cap), 0.0, 1.0)[..., None]
     sig_rgb = np.asarray(signal_color, dtype=np.float32)[None, None, :]
     rgb = rgb + (sig_rgb - rgb) * sig_a
+    if group_rgb is not None and group_alpha is not None:
+        rgb = rgb + (group_rgb - rgb) * group_alpha
     rgb *= float(light)
     np.clip(rgb, 0.0, 255.0, out=rgb)
     cell_pixels = rgb_to_pixel(rgb.astype(np.uint8), shifts)

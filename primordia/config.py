@@ -267,6 +267,27 @@ class Config:
     # so K tracks the outliers, not a transitive chain.
     species_threshold: float = 10.0
 
+    # --- observer groups (stage 23: measurement only, never read by the tick) ---
+    # Circular distance in tag_hue at or below which two living creatures
+    # count as the same observer group (viewer "countries", experiment
+    # metrics). Hue is the lineage colour of stage 15: inherited from one
+    # parent, mutated slowly around the wheel, pinned per founding region
+    # by founder_regions below — so hue groups track lineages, while
+    # genome-distance species clustering stays its own metric (with random
+    # brains at spawn it returns ~one cluster per creature). Greedy-leader
+    # on the circle, same first-match convention as species_threshold.
+    group_hue_threshold: float = 0.05
+
+    # --- founder scenario (stage 23: initial condition only, never a rule) ---
+    # 0 = off: spawn draws the pre-stage-23 RNG stream bit-for-bit. K > 0
+    # splits the initial population into K vertical strips of the torus;
+    # each strip gets tag_hue centred on k/K with +- founder_hue_spread
+    # jitter, so the observer's hue groups start as the founding lineages
+    # and contact between strips produces borders. Every region needs >= 2
+    # creatures: sexual reproduction only finds a mate inside mate_range.
+    founder_regions: int = 0
+    founder_hue_spread: float = 0.02
+
     # --- synaptic plasticity (stage 21: local Oja, no reward, Baldwin) ---
     # Weights never mutate inside a life: the rule writes only into the
     # scratch ``dw``, zeroed at birth and NOT inherited, so genome_dist and
@@ -444,6 +465,20 @@ class Config:
             raise ValueError("max_structures must be >= 0")
         if self.species_threshold <= 0.0:
             raise ValueError("species_threshold must be positive")
+        if not 0.0 < self.group_hue_threshold <= 0.5:
+            raise ValueError("group_hue_threshold must be in (0, 0.5]")
+        if self.founder_regions < 0:
+            raise ValueError("founder_regions must be >= 0")
+        if self.founder_hue_spread < 0.0:
+            raise ValueError("founder_hue_spread must be >= 0")
+        if (
+            self.founder_regions > 0
+            and self.initial_creatures < 2 * self.founder_regions
+        ):
+            raise ValueError(
+                "founder_regions needs >= 2 initial_creatures per region"
+                " (sexual reproduction requires a mate)"
+            )
         if self.genealogy_capacity < 0:
             raise ValueError("genealogy_capacity must be >= 0")
         if self.plasticity_mode not in ("off", "fixed", "gene"):

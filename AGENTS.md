@@ -13,8 +13,54 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
 - Código, identificadores, comentários, docstrings, mensagens de commit e
   README principal em **inglês**.
 
-## Estado atual do repositório (verificado em 2026-10-12)
-- **Etapa 22 ("casas incrementais") concluída, commit pendente de `/cp`:**
+## Estado atual do repositório (verificado em 2026-10-13)
+- **Etapa 23 ("observador de grupos + cenário fundador") concluída
+  (código + testes + bench + experimento; commit pendente de `/cp`):**
+  planos em `.opencode/plans/etapa-23-observador-cenario.md`,
+  `etapa-24-estados-afetivos.md`, `etapa-25-territorio-revisado.md`
+  (3 etapas aprovadas em lote pelo usuário; §5 fecha hidden 9→8/37
+  inputs na 24, depósito físico sem saída nova na 25, overlay
+  default-off, numeração 23→24→25). **Núcleo:** `primordia/observer.py`
+  novo — `GroupObserver` **fora do tick** (o tick nunca lê o observador):
+  clusters por `tag_hue` (greedy-leader circular 1-D com threshold
+  `Config.group_hue_threshold=0.05`; `cluster_living` do genoma 485-D não
+  serve como "países"), uid estável por match de slots
+  (`new/extinct/fusion`), `border_cells` (células ocupadas adjacentes no
+  torus, `owner` por maioria local), invasão geométrica (≥8 crossers em
+  células de maioria estrangeira, histerese por par) + `GroupEvent`/
+  `GroupSnapshot`. **Cenário fundador** em `world.py`: spawn em
+  `Config.founder_regions=0` (off = stream RNG **bit-idêntico**,
+  verificado) / 4: K faixas verticais do torus, hue central `k/K` ±
+  `founder_hue_spread=0.02`; validações novas (threshold>0, regions∈[0,64],
+  regions>1 exige pop≥regions, spread∈[0,0.5)). **Viewer:** toggle `g`
+  (`show_groups=False` default), overlay de cor por dono com alpha
+  (`draw_world` ganhou `group_rgb/group_alpha` opcionais — default
+  intocado), painel `group #uid pop/área/idade` + gauges `groups/borders`
+  + linha de ajuda `g groups`, log de eventos no canto (30 frames de
+  cache, mesmo ritmo do cluster do HUD). **`FORMAT_VERSION` segue 10**
+  (nenhum array de save novo; observer/cenário = Config + scratchs).
+  **Testes: 275 passed** — `tests/test_groups.py` (14: detecção, uid,
+  fronteiras com wrap, invasão, purity "o tick não muda", spawn fundador
+  bit-idêntico off, validações, determinismo) + 2 novos em
+  `tests/test_panel.py` (grupo no painel, overlay). **Bench: 566/292/179
+  t/s** a 500/2000/5000, `alive_final` 98/693/1166 **idêntico ao da etapa
+  22** → default bit-idêntico (piso 30 @N=2000 com ~10×). Screenshots
+  `/tmp/opencode/stage23_borders.png` (2 países + borda + log
+  `t1 invasion g1 g0` + HUD) e `stage23_groups.png`. **Experimento
+  `experiments/groups/`** (default vs `founder_regions=4`, seeds 42/7/13
+  × 10k, pré-registrado; `data/` gitignored): **H1 parcial — nulo
+  publicável**: fundadores começam em **4 grupos exatos 3/3** e seguram
+  4–5 até 2k (seed 7 até 5k), mas mutação de hue (0.01/birth × std 0.10)
+  deriva **ambas** para ~9 bandas aos 10k; founders4 tem **4× menos
+  fusions** (25 vs 112) e 2× menos extinções; fronteiras finais 100
+  [44,152] vs 149 [61,210]; invasões raras (0–8, só em densidade alta);
+  pops 1437 vs 1236 (trajetória, não tratamento). README do experimento
+  com 6 limitações; README principal: layout `observer.py`, 275 testes,
+  comando `groups`, roadmap 1–19+21+22+23. **Próximo passo: etapa 24**
+  (estresse+rancor: scratchs `stress`/`attacker_hue`+`attacker_age`,
+  35→37 inputs, hidden 9→8 → genoma 454, `FORMAT_VERSION` 10→11,
+  `experiments/affect/`), depois 25 (território revisado).
+- **Etapa 22 ("casas incrementais") concluída e commitada (`a55f134`):**
   plano em `.opencode/plans/etapa-22-casas-incrementais.md`. **Núcleo:**
   `struct_store` passa a guardar a completude `u∈[0,1]` das casas (fires
   continuam com 0; **sem array novo → `FORMAT_VERSION` segue 10**).
@@ -1080,7 +1126,11 @@ Roadmap "mundo real" aprovado (`.opencode/plans/roadmap-mundo-real.md`):
 15 tag/cor ✓ → 16 doação + `experiments/proto_culture/` ✓ →
 17 civilização (madeira/fogo/casas) + `experiments/civilization/` ✓ →
 18 balanceamento dos defaults ✓ → 19 daemon+SQLite ✓ →
-20 território (pendente) → 21 plasticidade/Oja ✓ →
-22 casas incrementais ✓ (nulo publicado, default off; commit pendente de `/cp`).
+21 plasticidade/Oja ✓ → 22 casas incrementais ✓ (nulo publicado,
+default off; `a55f134`) → 23 observador de grupos + cenário fundador ✓
+(nulo publicável; commit pendente de `/cp`) → 24 estados afetivos
+(estresse+rancor, hidden 9→8, genoma 454, `FORMAT_VERSION` 10→11) →
+25 território revisado (absorve a antiga etapa 20; `struct_deposit`).
+**Próximo passo:** etapa 24 (a decidir pelo usuário / executar sob pedido).
 
 Trabalhe **apenas na etapa que o usuário indicar**.

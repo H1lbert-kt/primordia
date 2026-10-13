@@ -580,8 +580,27 @@ class World:
         self.free_count = start
 
         cfg = self.config
-        self.pos[slots, 0] = self.rng.uniform(0.0, cfg.width, count)
-        self.pos[slots, 1] = self.rng.uniform(0.0, cfg.height, count)
+        if cfg.founder_regions > 0:
+            # Stage 23 founder scenario: vertical strips of the torus, one
+            # hue band per strip (remainder creatures go to the first
+            # regions). Off (0) keeps the old draw order bit-for-bit.
+            regions = cfg.founder_regions
+            base, rem = divmod(count, regions)
+            strip = cfg.width / regions
+            start = 0
+            for k in range(regions):
+                n_k = base + (1 if k < rem else 0)
+                if n_k == 0:
+                    continue
+                sl = slots[start : start + n_k]
+                start += n_k
+                self.pos[sl, 0] = self.rng.uniform(
+                    k * strip, (k + 1) * strip, n_k
+                )
+                self.pos[sl, 1] = self.rng.uniform(0.0, cfg.height, n_k)
+        else:
+            self.pos[slots, 0] = self.rng.uniform(0.0, cfg.width, count)
+            self.pos[slots, 1] = self.rng.uniform(0.0, cfg.height, count)
         self.vel[slots] = 0.0
         self.angle[slots] = self.rng.uniform(0.0, 2.0 * np.pi, count)
         self.energy[slots] = cfg.initial_energy
@@ -599,9 +618,26 @@ class World:
         self.genome[slots, traits + 1] = 1.0  # size (contact, stage 5)
         self.genome[slots, traits + 2] = cfg.vision_range
         self.genome[slots, traits + 3] = 0.0  # diet: 0 = herbivore (stage 5)
-        self.genome[slots, traits + 4] = self.rng.uniform(
-            0.0, 1.0, count
-        )  # tag_hue: neutral lineage colour (stage 15)
+        if cfg.founder_regions > 0:
+            # stage 23: one hue band per founder strip — the observer's
+            # groups start as the founding lineages (jitter wraps the wheel)
+            regions = cfg.founder_regions
+            base, rem = divmod(count, regions)
+            start = 0
+            for k in range(regions):
+                n_k = base + (1 if k < rem else 0)
+                if n_k == 0:
+                    continue
+                sl = slots[start : start + n_k]
+                start += n_k
+                hue = k / regions + self.rng.uniform(
+                    -cfg.founder_hue_spread, cfg.founder_hue_spread, n_k
+                )
+                self.genome[sl, traits + 4] = hue - np.floor(hue)
+        else:
+            self.genome[slots, traits + 4] = self.rng.uniform(
+                0.0, 1.0, count
+            )  # tag_hue: neutral lineage colour (stage 15)
         self.genome[slots, traits + 5] = 0.0  # plasticity eta (stage 21): born
         # unlearned; only mutation can turn learning on, and it always pays
         # plasticity_cost — selection decides whether the gene is worth it

@@ -98,6 +98,15 @@ class Settings:
     spark_alive: tuple[int, int, int] = (120, 200, 255)
     spark_energy: tuple[int, int, int] = (240, 200, 100)
 
+    # observer groups (stage 23): viewer-only country overlay, default OFF —
+    # colouring the world by detected groups is presentation, never a sim
+    # rule (the tick cannot see any of it). Press 'g' in the viewer.
+    show_groups: bool = False
+    group_overlay_alpha: float = 0.20  # fill alpha over owned cells
+    group_border_alpha: float = 0.55  # brighter alpha on frontier cells
+    group_border_color: tuple[int, int, int] = (235, 235, 240)
+    group_event_log: int = 6  # recent event lines in the viewport corner
+
     # simulation speed: ticks advanced per rendered frame
     speed_steps: tuple[int, ...] = (1, 2, 4, 8)
 

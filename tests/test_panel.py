@@ -134,6 +134,71 @@ def test_panel_shows_cluster_when_cached(ready_world: World) -> None:
     assert not any("species 0" in m for m in with_cache + without)
 
 
+def test_panel_shows_group_when_cached(ready_world: World) -> None:
+    """Stage 23: the selected panel shows the observer group when cached."""
+    from primordia.render import panel as P
+    from primordia.render.settings import Settings
+
+    settings = Settings()
+    slot = int(np.flatnonzero(ready_world.alive)[0])
+
+    def collect(hud) -> list[str]:
+        messages: list[str] = []
+        original = P._text
+
+        def spy(dst, size, msg, x, y, color):
+            messages.append(msg)
+            return original(dst, size, msg, x, y, color)
+
+        P._text = spy
+        try:
+            surf = pygame.Surface((settings.panel_width, settings.window_height))
+            P.render_panel(surf, ready_world, slot, hud, settings)
+        finally:
+            P._text = original
+        return messages
+
+    lut = np.full(ready_world.config.max_creatures, -1, dtype=np.int32)
+    lut[slot] = 2
+    with_cache = collect(P.Hud(
+        fps=60.0, speed=1, paused=False, follow=False, seed=42,
+        group_uid_of_slot=lut, group_info={2: (11, 34, 120)},
+    ))
+    without = collect(P.Hud(
+        fps=60.0, speed=1, paused=False, follow=False, seed=42,
+    ))
+    assert any(
+        "group #2  pop 11  area 34  age 120" in m for m in with_cache
+    ), with_cache
+    assert not any("group #" in m for m in without), without
+
+
+def test_panel_shows_groups_gauges_when_cached(ready_world: World) -> None:
+    """Stage 23 WORLD line: groups K and border cells while cached."""
+    from primordia.render import panel as P
+    from primordia.render.settings import Settings
+
+    settings = Settings()
+    messages: list[str] = []
+    original = P._text
+
+    def spy(dst, size, msg, x, y, color):
+        messages.append(msg)
+        return original(dst, size, msg, x, y, color)
+
+    P._text = spy
+    try:
+        surf = pygame.Surface((settings.panel_width, settings.window_height))
+        hud = P.Hud(
+            fps=60.0, speed=1, paused=False, follow=False, seed=42,
+            groups_k=3, border_cells=42,
+        )
+        P.render_panel(surf, ready_world, -1, hud, settings)
+    finally:
+        P._text = original
+    assert any("groups 3   borders 42" in m for m in messages), messages
+
+
 def test_panel_shows_all_gates_and_w2_layout(ready_world: World) -> None:
     """Stage 17: the outputs list shows all 8 outputs and W2 is 8 wide."""
     from primordia.render import panel as P

@@ -283,6 +283,7 @@ python experiments/civilization/run.py --phase gate --house-energy 1000000  # co
 python experiments/plasticity/run.py --ticks 10000  # stage 21: Oja ablation (~15 min)
 python experiments/plasticity/run.py --phase clones
 python experiments/houses/run.py --phase pilot       # stage 22: incremental houses (null)
+python experiments/groups/run.py --force             # stage 23: founder groups/borders (null)
 
 # stats + plots
 python run.py --seed 42 --headless --ticks 5000 --stats s42.npz
@@ -313,8 +314,9 @@ primordia/
   config.py world.py genome.py brain.py sensors.py
   step.py     stats.py   io.py       bench.py ecology.py
   database.py # stage-19 SQLite world store (daemon checkpoints + timeline)
+  observer.py # stage-23 hue-group observer (frontiers/events, off-tick)
   render/     # pygame viewer + headless GIF recorder (never imported by core)
-tests/        # 259 tests: determinism, invariants, save/load, guards
+tests/        # 275 tests: determinism, invariants, save/load, guards
 experiments/  # one script + README per experiment
 run.py        # CLI: --seed --headless --ticks --load --save --stats
               #      --config --record --screenshot --select
@@ -373,9 +375,17 @@ bites 8→2 at the same cost, and payback closes in ~1 tick, but the
 hauling and construction drain cuts births 287–410 → 69–153 and ends
 every variant at ~0.3× the control population, so the default stays
 `houses_enabled = false` and no gate ran — an honest null on housing,
-the second one, now with the mechanics redesigned). The "real world"
+the second one, now with the mechanics redesigned), and the group
+observer (stage 23: an off-tick observer that clusters living creatures
+by `tag_hue` and reports groups, frontiers and contact events — a
+founder scenario pins 4 lineages to 4 torus strips, starts at exactly 4
+groups in 3/3 seeds and holds them for 2–5k ticks with 4× fewer fusions
+than the free run, but mutation drifts both variants to ~9 hue bands by
+10k, so founding buys coherence for a while, not forever — honest null
+on permanent countries, in `experiments/groups/`, with a `g` toggle for
+the group overlay in the viewer). The "real world"
 roadmap continues with territory (stage 20, still pending — skipped
-ahead to Oja by choice). Known open
+ahead to Oja by choice) and the planned stress/rancor stage (24). Known open
 problems are documented above (predation still a trickle, creatures still
 circle) rather than hidden.
 

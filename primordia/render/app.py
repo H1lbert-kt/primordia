@@ -18,6 +18,7 @@ import pygame
 
 from ..cycles import light_level
 from ..ecology import cluster_living
+from ..observer import GroupObserver, GroupSnapshot
 from ..step import advance
 from ..world import World
 from .camera import Camera
@@ -28,6 +29,7 @@ from .draw import (
     draw_overlay,
     draw_trail,
     draw_world,
+    hue_lut,
     make_food_lut,
     make_terrain_lut,
     make_wood_lut,
@@ -38,12 +40,46 @@ from .draw import (
     stamp_creatures,
     stamp_structures,
 )
-from .panel import Hud, clear_font_cache, render_panel
+from .panel import Hud, clear_font_cache, draw_event_log, render_panel
 from .settings import Settings
 
 
 def _save_screenshot(screen: pygame.Surface, path: str) -> None:
     pygame.image.save(screen, path)
+
+
+def _rebuild_group_overlay(
+    snapshot: GroupSnapshot,
+    group_rgb: np.ndarray,
+    group_alpha: np.ndarray,
+    settings: Settings,
+) -> None:
+    """Fill the country fill/alpha grids from the latest observer sample.
+
+    Each owned cell gets its group's circular-mean hue (so the overlay
+    colour is the lineage colour the creatures already wear as rings);
+    frontier cells — torus-adjacent to a different living group — get the
+    brighter border alpha. Observer output only; the world is untouched.
+    """
+    owner = snapshot.owner
+    occupied = owner >= 0
+    group_rgb.fill(0.0)
+    group_alpha.fill(0.0)
+    if not occupied.any():
+        return
+    lut = hue_lut()
+    uids = np.unique(owner[occupied])
+    idx = np.zeros(int(uids.max()) + 1, dtype=np.int32)
+    for u in uids:
+        idx[int(u)] = int(snapshot.hues.get(int(u), 0.0) * 255.0) & 255
+    group_rgb[occupied] = lut[idx[owner[occupied]]]
+    group_alpha[occupied, 0] = settings.group_overlay_alpha
+    diff = np.zeros(owner.shape, dtype=bool)
+    for axis in (0, 1):
+        for shift in (1, -1):
+            other = np.roll(owner, shift, axis=axis)
+            diff |= occupied & (other >= 0) & (other != owner)
+    group_alpha[occupied & diff, 0] = settings.group_border_alpha
 
 
 def run_app(
@@ -92,9 +128,17 @@ def run_app(
     # Stage 12: species clustering is O(alive * K) pure-Python, so it is
     # recomputed every CLUSTER_REFRESH_FRAMES frames and reused in between
     # (both for the HUD K and the selected creature's cluster label).
+    # Stage 23: the same timer refreshes the hue-group observer (cheap 1-D
+    # clustering + per-cell majority) behind the optional country overlay.
     CLUSTER_REFRESH_FRAMES = 30
     cluster_k: int | None = None
     cluster_label_of_slot: np.ndarray | None = None
+    observer = GroupObserver(cfg)
+    show_groups = settings.show_groups
+    snapshot: GroupSnapshot | None = None
+    gh, gw = world.food.shape
+    group_rgb = np.zeros((gh, gw, 3), dtype=np.float32)
+    group_alpha = np.zeros((gh, gw, 1), dtype=np.float32)
     paused = False
     speed_index = 0
     follow = selected >= 0  # a preset selection starts tracking its creature
@@ -131,6 +175,8 @@ def run_app(
                 elif event.key == pygame.K_f:
                     if selected >= 0:
                         follow = not follow
+                elif event.key == pygame.K_g:
+                    show_groups = not show_groups
                 elif event.key == pygame.K_ESCAPE:
                     selected, follow = -1, False
                 elif event.key == pygame.K_F12 and screenshot_path:
@@ -197,7 +243,15 @@ def run_app(
 
         pixels = pygame.surfarray.pixels2d(world_surface)
         light = float(light_level(cfg, world.tick))
-        draw_world(pixels, world, camera, food_lut, terrain_lut, wood_lut, light, shifts, buffers, settings.meat_color, settings.signal_color)
+        if frames % CLUSTER_REFRESH_FRAMES == 0:
+            snapshot = observer.sample(world)
+        if show_groups and snapshot is not None:
+            _rebuild_group_overlay(snapshot, group_rgb, group_alpha, settings)
+            g_rgb: np.ndarray | None = group_rgb
+            g_alpha: np.ndarray | None = group_alpha
+        else:
+            g_rgb = g_alpha = None
+        draw_world(pixels, world, camera, food_lut, terrain_lut, wood_lut, light, shifts, buffers, settings.meat_color, settings.signal_color, g_rgb, g_alpha)
         stamp_structures(pixels, world, camera, settings, shifts, light)
         stamp_creatures(pixels, world, camera, settings, shifts, light)
         del pixels
@@ -213,6 +267,8 @@ def run_app(
         render_transfers(overlay, event_tracker.transfers, camera, settings)
         world_surface.blit(overlay, (0, 0))
         draw_overlay(world_surface, world, camera, selected, settings)
+        if show_groups:
+            draw_event_log(world_surface, observer.events, settings)
         if frames % CLUSTER_REFRESH_FRAMES == 0:
             slots, labels = cluster_living(world, cfg.species_threshold)
             cluster_k = int(np.unique(labels).size) if slots.size else 0
@@ -233,6 +289,21 @@ def run_app(
                 energy_hist=sparks.energy,
                 species_k=cluster_k,
                 cluster_label_of_slot=cluster_label_of_slot,
+                groups_k=snapshot.n_groups if snapshot is not None else None,
+                border_cells=(
+                    snapshot.border_cells if snapshot is not None else None
+                ),
+                group_uid_of_slot=(
+                    snapshot.uid_of_slot if snapshot is not None else None
+                ),
+                group_info=(
+                    {
+                        u: (snapshot.pops[u], snapshot.areas.get(u, 0), snapshot.ages[u])
+                        for u in snapshot.pops
+                    }
+                    if snapshot is not None
+                    else None
+                ),
             ),
             settings,
         )
