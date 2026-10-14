@@ -103,8 +103,8 @@ health.
    across variants (0.22–0.70 nodiff vs 0.26–0.42 mid vs 0.24–0.43
    fast). Nothing in this world has a *use* for a wider trail yet —
    the channel is physically trail-shaped and semantically uninterpreted
-   in 10k ticks. Stage 15 (tag/color) and stage 16 (donation) are the
-   planned consumers.
+   in 10k ticks. Stages 15 (tag/color) and 16 (donation) shipped later
+   and neither consumes the field — the channel still has no reader.
 4. **`signal_mass` differs across variants (4.4k–5.6k) without mass
    creation.** The Jacobi step conserves the field sum exactly (unit
    test `test_diffusion_conserves_mass`); what differs is the *source* —

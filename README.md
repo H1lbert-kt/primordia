@@ -1,5 +1,9 @@
 # Primordia
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+[![tests: 311 passed](https://img.shields.io/badge/tests-311%20passed-brightgreen.svg)](tests/)
+
 ![demo](docs/demo.gif)
 
 **A 2D ecosystem where neural creatures evolve by natural selection — there is
@@ -10,6 +14,8 @@ on the evolved body/brain traits, or they don't. This repo is an honest
 attempt to find out which, with reproducible experiments and published
 negative results.
 
+**Leia em português:** [README.pt-BR.md](README.pt-BR.md)
+
 ```bash
 pip install -e ".[render,dev]"
 python run.py --seed 42                # windowed viewer
@@ -17,29 +23,44 @@ python run.py --seed 42 --headless --ticks 5000 --stats s42.npz
 pytest -q
 ```
 
+## Contents
+
+- [How it works](#how-it-works)
+- [Inspirations](#inspirations)
+- [What I discovered](#what-i-discovered)
+- [Challenges and open problems](#challenges-and-open-problems)
+- [Viewer](#viewer)
+- [The world that runs by itself](#the-world-that-runs-by-itself)
+- [Performance](#performance)
+- [Reproduce everything](#reproduce-everything)
+- [Project layout](#project-layout)
+- [Roadmap (25 stages)](#roadmap-25-stages)
+- [License](#license)
+
 ## How it works
 
 - **No fitness, no objectives.** Energy is the only currency: eat food (or
   meat), pay metabolic and movement costs, and split when you cross
   `reproduce_threshold`. Death = energy ≤ 0, `max_age`, or a predator's bite.
-- **Evolvable body and brain.** Each creature is a genome of 454 values: a
-  38-input network (7-ray food sum, creatures, prey and carrion peak
+  Nothing in the tick ever rewards "intelligence", distance travelled, or any
+  particular behaviour.
+- **Evolvable body and brain.** Each creature is a genome of **454 values**:
+  a **38-input** network (7-ray food sum, creatures, prey and carrion peak
   channels, left/right food antennas, internal state, ambient light, three
-  signal-field sensors, the hue similarity of neighbours in the smell
-  window, the wood smell of that same window, two bite scars — accumulated
-  stress and a recency-faded rancor toward the last attacker's hue — and,
-  since stage 25, a signed bank reading: + if you stand on your own banked
-  house, − on a foreign one) → 8 hidden units with
-  Elman recurrence → turn, accelerate, eat/attack, emit signal, donate
-  energy, gather wood, build a campfire, build a house — plus
-  body traits: max speed, size, vision range, *diet* (0 = herbivore;
-  predation capability is itself a trait that has to evolve) and a
-  heritable lineage hue — neutral by construction (nothing in the tick
-  rewards it), shown as a ring under the sprite. The affect inputs are
-  **information, not reward**: the channel is off by default and the
-  experiment that turned it on halved the population (stage 24, below);
-  the bank input is a physical reading of energy the world already holds,
-  never a prize.
+  signal-field sensors, the hue similarity of neighbours in the smell window,
+  the wood smell of that same window, two bite scars — accumulated stress and
+  a recency-faded rancor toward the last attacker's hue — and, since stage 25,
+  a signed bank reading: + if you stand on your own banked house, − on a
+  foreign one) → **8 hidden units** with Elman recurrence → 8 outputs: turn,
+  accelerate, eat/attack/withdraw/raid, emit signal, donate energy, gather
+  wood, build a campfire, build a house — plus **6 body traits**: max speed,
+  size, vision range, *diet* (0 = herbivore; predation capability is itself a
+  trait that has to evolve), a heritable lineage hue — neutral by
+  construction, shown as a ring under the sprite — and the learning rate η of
+  the plasticity rule. Informational inputs (stress, grudge, the bank) are
+  **readings of what the world already holds, never prizes**; the affect
+  channel is off by default and the experiment that turned it on halved the
+  population (stage 24, below).
 - **Sex and aging, not just cloning.** Reproduction is sexual: an initiator
   above the threshold searches for a nearby partner, each parent pays half
   the child's energy, and the genome is a per-gene crossover plus mutation.
@@ -49,6 +70,9 @@ pytest -q
 - **A world that pushes back.** Terrain fertility and lakes shape where food
   grows, a sun sets a day/night light cycle (vision shrinks at night), and
   seasons modulate growth — all pure physics from `Config`, no objectives.
+  Wood grows in patches; campfires cook; houses can be raised in deliveries,
+  shield their owner, and rot if unfinished; deposited energy can be guarded
+  or raided; a mark on the ground trims your metabolic bill.
 - **Headless core, one-way rendering.** The core modules (`world`, `step`,
   `brain`, `genome`, `sensors`, `stats`, `io`) never import pygame or
   matplotlib; the viewer only reads state.
@@ -59,11 +83,41 @@ pytest -q
   objects per creature, no allocation in the tick, spatial-hash neighbor
   queries, everything hot in Numba `@njit`.
 
+## Inspirations
+
+Primordia stands in a lineage of artificial-life projects that ask the same
+question — *how much can emerge from very little?*
+
+- **Conway's Game of Life (1970)** — the founding demonstration that fixed,
+  dumb, local rules give gliders, guns and computation with nobody in charge.
+  Primordia's rule has the same shape: a creature only eats, pays and splits;
+  predation, herds and borders are written nowhere.
+- **Tierra (Thomas Ray, 1991) and Avida** — free-living digital organisms
+  competing and reproducing in code, studied *without* a hand-fed fitness
+  function; Avida in particular showed how to *measure* evolution instead of
+  prescribing it. That is the method here: run the world, then measure.
+- **Polyworld (Larry Sims, 1996)** — a 2D ecosystem where brains and bodies
+  are encoded in the genome and drawn as a living map: a direct ancestor of
+  Primordia's viewer.
+- **NEAT and evolving neural networks (Stanley & Miikkulainen, 2002)** — the
+  habit of putting connection weights in the genome and letting selection
+  shape behaviour. Primordia keeps a fixed, deliberately small topology (the
+  500-parameter budget) instead of evolving structure, so every new sense has
+  to earn its way into a tight budget.
+- **The Blind Watchmaker (Dawkins, 1986)** — biomorphs showing that selection,
+  not design, explains the appearance of purpose. "No fitness, no objectives"
+  is that idea taken literally.
+
+What this project adds on top of that old dream is the engineering discipline
+around it: bit-exact determinism, versioned saves, pre-registered experiments
+with published failures, and a performance floor that runs on a laptop CPU.
+
 ## What I discovered
 
-These are the results of the stage-8 experiments
-([`experiments/`](experiments/)), 3 seeds × 5000 ticks each. Full method and
-limitations in each experiment's README.
+Results accumulated across the experiment suite
+([`experiments/`](experiments/)) — stages 8 through 25, mostly 3 seeds ×
+5 000–10 000 ticks each. Full method and limitations in each experiment's
+README.
 
 > **Reproducibility note.** The tables and figures below were produced on the
 > pre-stage-9 tree (19-input, 12-hidden feedforward brains, uniform food
@@ -74,14 +128,14 @@ limitations in each experiment's README.
 > (30 inputs, `FORMAT_VERSION 4`), stage 12 widened the genealogy log
 > with the mating partner and added the species/barrier stats columns
 > (`FORMAT_VERSION 5`), stage 13 wired the common signal channel
-> (33 inputs, a 4th brain output, `FORMAT_VERSION 6`), and stage 14 made
+> (33 inputs, a 4th brain output, `FORMAT_VERSION 6`), stage 14 made
 > that channel diffuse — a Jacobi pass spreads the field into trails
-> (config-only, `FORMAT_VERSION` stays 6), while stage 15 added a neutral
+> (config-only, `FORMAT_VERSION` stays 6), stage 15 added a neutral
 > lineage hue (34 inputs, a 5th body trait, `FORMAT_VERSION 7`), stage
 > 16 opened a donation channel (a 5th brain output gifting energy to the
-> nearest neighbour, 9 hidden units, `FORMAT_VERSION 8`) and stage 17
+> nearest neighbour, 9 hidden units, `FORMAT_VERSION 8`), stage 17
 > added the civilization base (a wood-smell input and three outputs for
-> gather/build-fire/build-house, `FORMAT_VERSION 9`). Stage 18
+> gather/build-fire/build-house, `FORMAT_VERSION 9`), stage 18
 > recalibrated the *default* prices only (fire 10 → 5, houses priced
 > out of the default world at 1e6 — Config, no tick change), stage 19
 > added the SQLite daemon (Config/CLI/storage only), and stage 21 opened
@@ -103,9 +157,8 @@ limitations in each experiment's README.
 > bank (a signed `store` input reading the energy banked underfoot,
 > 38 in, genome 446 → 454, `FORMAT_VERSION 12` — `struct_deposit` is
 > saved; the mark ring, mark owner and raid-flash map are scratch and
-> rebuilt). The experiment
-> scripts pin the old regime
-> off via `STAGE8_BASE` so the *regime* is preserved — but reruns on current
+> rebuilt). The experiment scripts pin the old regime off via
+> `STAGE8_BASE` so the *regime* is preserved — but reruns on current
 > HEAD use the sexual dynamics; the original asexual runs stay in each
 > experiment's gitignored `data/` cache (bit-exact reproduction needs the
 > pre-stage-9 commit).
@@ -228,16 +281,110 @@ of concerns: identical genomes in two environments diverge in `dw`
 
 ![plasticity](experiments/plasticity/figs/gate.png)
 
+More results live in each experiment's README: neutral hue structure 9–23×
+above a random spawn (`experiments/tags/`), gifts aligned 2.6–4.7× beyond
+chance toward kin (`experiments/proto_culture/`), fire/cooking surviving
+while housing collapses the population (`experiments/civilization/`,
+`experiments/houses/`), founder countries that hold then dissolve
+(`experiments/groups/`), bite scars that cut predation but halve the
+population (`experiments/affect/`), and a territory bank whose mechanism
+moves 2296 units of energy on the surviving seed while its pre-registered
+gate fails for the *context*, not the treatment
+(`experiments/territory/`).
+
+## Challenges and open problems
+
+### What was hard along the way
+
+**1. Balance kept killing the worlds (stages 8, 9.5, 10, 18).** The default
+CLI world once ended 3/86/70 alive at 5k ticks — a house price that was
+never gated was silently eating the economy. The lesson, learned twice: the
+obvious knobs only change the *slope* of an exponential, so every fix is a
+pre-registered sweep plus a `Config` change, never a clamp or an emergency
+spawn. "Report the metrics, propose a parameter, let the human decide" is
+what kept the project out of hack-soup.
+
+**2. Predation refused to emerge (stages 8 → 12.5).** The bite budget is
+`bite_rate × diet`: near diet 0, meat cannot pay for the bite, and diet
+cannot grow without meat paying — a lock that three published experiments
+could not open. A ratchet on `bite_rate`/`contact_range` finally made
+predation *measurable* (1179 kills/run vs 43), but obligate predators still
+never appear. Still open (see below).
+
+**3. Determinism is a constant discipline.** Two RNG streams (a NumPy
+`Generator` for Python-side draws and the process-global Numba stream for
+kernels); worlds must be advanced **sequentially** because the Numba stream
+is shared; no random draws inside `prange`; save/load must capture *both*
+streams or continuation silently diverges; and every genome-layout change
+shifts the stream, which is why old caches go stale and old figures need old
+commits. A determinism bug outranks every feature.
+
+**4. Speed on a 2018 laptop, no GPU.** The hard rules exist because the
+alternative was measured, not assumed: no Python loop over creatures,
+spatial hash instead of O(N²), pre-allocated buffers inside the tick. And
+because machine load moves ticks/s by 2–4× between processes, comparisons
+are A/B in a single session with a per-phase profile — a number from a
+different day means nothing. Landmines found on the way: `@` in one `einsum`
+silently hit an OpenBLAS bug (35 ticks/s instead of thousands), and two
+Numba processes running in parallel throttle each other ~20×.
+
+**5. The 500-parameter brain budget.** Every new sensor costs hidden units:
+hidden went 12 → 10 → 9 → 8, and stage 24 actually *shrank* the genome
+491 → 446 to fit two new inputs. Senses and capacity genuinely compete; some
+stages paid for a new sense by cutting the hidden width in half.
+
+**6. Save-format archaeology (`FORMAT_VERSION` 1 → 12).** Twelve layout
+bumps, each rejected loudly on old files instead of silently reshaping
+columns. The recurring design question: what is *state* (saved, must
+continue bit-identically) versus *scratch* (rebuilt on load — grids, marks,
+flash maps, lifetime scars)?
+
+**7. Publishing failures.** The hardest habit in the project: pre-register
+the gate, run it as written, publish the FAIL. Housing failed twice, the
+affect channel failed, plasticity's selection test came back negative, and
+the territory gate failed for the control arm. A cherry-picked gif would
+have been much easier; the READMEs are more valuable because they are not
+cherry-picked.
+
+**8. Keeping the core headless.** The simulation package must never import
+pygame or matplotlib, and rendering must never write state — enforced by
+tests, because a single convenience import in a hot module would end the
+"run it anywhere, including CI-less servers" property.
+
+### Still hard right now
+
+- **Predation is a trickle, not a food web.** ≥99.9% of every run is
+  herbivore; no obligate predator (diet > 0.5) survives at snapshots. The
+  lock in challenge 2 is not solved, only ratcheted.
+- **Creatures still circle.** `turn_cost` cut rotation ~10×, but straight
+  movement is still rare — the classic "neuroevolution finds the spinner"
+  attractor is only dented.
+- **Experiment context instability.** A pre-registered gate can fail because
+  the *control* arm goes extinct (the territory control died on seed 7), not
+  because the treatment fails. Fixing this needs economy/context sweeps —
+  the honest next step, not another mechanism.
+- **Selection prices learning instead of promoting it.** The evolvable
+  plasticity η sits below its own neutral-drift control in 3/3 seeds; the
+  cost is being selected against.
+- **Founder coherence decays.** Four pinned lineages start as exactly four
+  groups but hue mutation drifts every run to ~9 bands by 10k ticks.
+- **Process gaps:** no CI (tests are run manually before every commit), the
+  benchmark is load-sensitive and hand-compared, bit-exact reproduction of
+  old figures requires old commits, and it is a single-maintainer project.
+
 ## Viewer
 
 `python run.py --seed 42` opens the pygame-ce window: drag to pan, wheel to
-zoom, click a creature to inspect its brain (per-layer weights including
-the recurrent matrix, firing activity), space to pause, `1-4` to change sim
+zoom, click a creature to inspect its brain (per-layer weights including the
+recurrent matrix, firing activity), space to pause, `1-4` to change sim
 speed. The camera follows the selection with a trail, births and deaths
-flash in place, and the side panel shows population, births, deaths by
-cause, and mean energy live (sparkline in overview mode). The world renders
-terrain under the food layer (blue lakes, shorelines, fertile ground) and
-the whole scene dims with the day/night cycle shown as `light` in the HUD.
+flash in place, and the side panel shows population, births, deaths by cause,
+and mean energy live (sparkline in overview mode). Overlays toggle with `g`
+(hue-group observer: countries, frontiers, contact events) and `t`
+(territory: mark rings tinted by owner hue, deposit bars over banked houses,
+orange raid lines). The world renders terrain under the food layer (blue
+lakes, shorelines, fertile ground) and the whole scene dims with the
+day/night cycle shown as `light` in the HUD.
 
 ## The world that runs by itself
 
@@ -256,11 +403,11 @@ each); resuming from a checkpoint and continuing N ticks is
 
 Target: ≥ 30 ticks/s at 2000 creatures headless (i5-8265U, no GPU).
 
-| creatures | ticks/s (load 2.5–3.0, stage-25 defaults) |
+| creatures | ticks/s (stage-25 defaults, load 2.5–3.0) |
 |---|---|
-| 500 | 617–846 |
-| 2000 | 168–530 |
-| 5000 | 104–203 |
+| 500 | 617 |
+| 2000 | 318 |
+| 5000 | 162 |
 
 Numbers vary 2–4× between processes depending on machine load (this box runs
 a desktop session); compare A/B in the same session. Stage 25's territory
@@ -270,21 +417,14 @@ phase structure — no new phase, no new allocation — and the floor holds
 with ~10× margin (617/318/162 at load 2.5–3.0). Stage 22's rebuild
 (additive delivery logic, rot, the hauling tax) leaves the default world
 bit-identical — `alive_final` 98/693/1166 matches the stage-21 HEAD exactly
-— and the floor holds with 5× margin. Stage 17 added five
-phases (wood growth, structure decay, gather, build, structure rebuild)
-that together cost ~138 µs/tick ≈ **1.2%** of the tick at N=2000 (profile:
-11/4/33/44/47 µs) — the table's range is machine load, not the new phases,
-and the 30 ticks/s floor at N=2000 holds with 5–8× margin (`alive_final`
-109/662/1112 under the stage-18 default prices). Stage 16's donate phase
-(0.75 µs at default, ~24 µs when gifts are active) and earlier per-phase
-costs are listed in `AGENTS.md`. Stage 21's plasticity phase costs
-~130 µs/tick ≈ **4%** at N=2000 when engaged; the A/B same-session
-measurement (mode `off` vs `gene`, load ~7) was 301/259 vs 285/253
-ticks/s at N=2000 — a 2–5% price with the 30 ticks/s floor intact. The
-stage-10 economy holds different
-populations than older tables during a 1000-tick bench, so they are not
-directly comparable to earlier runs. `python -m primordia.bench [--profile]`
-reproduces the table.
+— and the floor holds with 5× margin. Stage 17 added five phases (wood
+growth, structure decay, gather, build, structure rebuild) that together
+cost ~138 µs/tick ≈ **1.2%** of the tick at N=2000 (profile: 11/4/33/44/47
+µs). Stage 16's donate phase costs 0.75 µs at default, ~24 µs when gifts
+are active; stage 21's plasticity phase ~130 µs/tick ≈ **4%** at N=2000
+when engaged (A/B same-session: 301/259 vs 285/253 ticks/s at N=2000, a
+2–5% price with the floor intact). Older per-phase costs are listed in
+`AGENTS.md`. `python -m primordia.bench [--profile]` reproduces the table.
 
 ## Reproduce everything
 
@@ -329,104 +469,62 @@ python run.py --seed 42 --headless --ticks 9000 \
 python run.py --headless --ticks 1000 --config overrides.example.json
 ```
 
+Every experiment directory holds the same four things: a runnable `run.py`,
+cached raw data in a gitignored `data/`, generated figures in `figs/`, and a
+`README.md` with the question, the method, the numbers and the limitations.
+
 ## Project layout
 
 ```
 primordia/
   config.py world.py genome.py brain.py sensors.py
   step.py     stats.py   io.py       bench.py ecology.py
+  cycles.py   # stage-10 light/day-night/season laws
   database.py # stage-19 SQLite world store (daemon checkpoints + timeline)
   observer.py # stage-23 hue-group observer (frontiers/events, off-tick)
   render/     # pygame viewer + headless GIF recorder (never imported by core)
 tests/        # 311 tests: determinism, invariants, save/load, guards
-experiments/  # one script + README per experiment
+experiments/  # one script + README per experiment (index: experiments/README.md)
 run.py        # CLI: --seed --headless --ticks --load --save --stats
-              #      --config --record --screenshot --select
+              #      --config --record --screenshot --select --daemon --db
 ```
 
-## Roadmap status
+## Roadmap (25 stages)
 
-Stages 1–19 of the plan are implemented: world+food, brain+sensors,
-genome+reproduction, viewer, evolvable predation, stats/plots,
-save/load+genealogy, experiments/demo/publication, the guided-world stage
-(persistent food patches, richer senses, Elman recurrence, a richer
-viewer), the balance stage (food economy recalibrated, turning now costs
-energy, larger sprites), the environment stage (terrain, water,
-day/night light, seasons), the biology stage (sexual reproduction,
-senescence, carrion/smell), the ecology stage (diet-class gauges,
-genome clustering, reproductive-barrier metric — no new tick logic,
-measured results in `experiments/ecology/`), the signal channel (stage 13:
-a scalar emit gate and smell sensors, no reward), pheromone diffusion
-(stage 14: the field spreads into trails — physics confirmed in
-`experiments/trails/`, interpretation still null at 10k), the lineage
-hue (stage 15: a neutral heritable colour plus a neighbour-hue-similarity
-input and sprite rings — no reward anywhere, yet in 3 seeds × 10k
-(`experiments/tags/`) families occupy windows 9–23× denser than a random
-spawn and hues align 1.5–19× beyond spacing alone, while global diversity
-drifts seed-dependently; structure ≠ sensor use, stated as a limitation),
-donation (stage 16: a 5th brain output gifts energy to the nearest
-neighbour — in 3 seeds × 10k (`experiments/proto_culture/`) the channel
-survives at both prices, gift pairs align 2.6–4.7× beyond chance (kin
-receives), the cheap gate does not close while the dear one falls only
-6% — selection against the leak exists but is slow; the tick never
-rewards giving), and the civilization base (stage 17: wood as a carried
-resource, campfires that cook, houses that shelter — in 10k
-`experiments/civilization/` the fire/cooking economy survives 3/3 runs
-while houses collapse it ~10× and extinct 1/3 of seeds even at half the
-price; selection does close the build spam, but only after the
-demographic damage — honest negative on housing, documented in the
-experiment's README), and the default-prices balance stage (stage 18:
-the CLI's default world was starving — houses at 20 collapsed it to 3
-alive at 5k — so houses are priced out of the default (1e6) and the
-fire swept 5/10/20; the new default ends 1163/1170/821 alive at 10k,
-Config-only, no tick change), and the daemon (stage 19: a world that
-runs by itself — SQLite checkpoints + timeline via stdlib, resume
-bit-identical, the window opens the newest snapshot), and lifetime
-plasticity (stage 21: Oja's rule on a separate, decaying, energy-billed
-`dw` delta with an evolvable learning-rate gene — pure Oja never beats
-the control and η=1e-2 goes extinct; the evolvable gene's distribution
-sits *below* neutral drift in 3/3 seeds, i.e. the cost is selected
-against, not learning for — Config default off, gene pinned in
-`configs/proto_culture.toml`, in `experiments/plasticity/`), and the
-incremental house (stage 22: a house is now raised in wood deliveries
-with cover scaling by completeness, unfinished stubs rot, hauling wood
-is dearer than holding it, and each delivery wants a fire nearby — in
-the pre-registered sweep (`experiments/houses/`, wood×energy×cover plus
-per-cost no-effect twins) *no* price passes: shelter measurably cuts
-bites 8→2 at the same cost, and payback closes in ~1 tick, but the
-hauling and construction drain cuts births 287–410 → 69–153 and ends
-every variant at ~0.3× the control population, so the default stays
-`houses_enabled = false` and no gate ran — an honest null on housing,
-the second one, now with the mechanics redesigned), and the group
-observer (stage 23: an off-tick observer that clusters living creatures
-by `tag_hue` and reports groups, frontiers and contact events — a
-founder scenario pins 4 lineages to 4 torus strips, starts at exactly 4
-groups in 3/3 seeds and holds them for 2–5k ticks with 4× fewer fusions
-than the free run, but mutation drifts both variants to ~9 hue bands by
-10k, so founding buys coherence for a while, not forever — honest null
-on permanent countries, in `experiments/groups/`, with a `g` toggle for
-the group overlay in the viewer), and the affect channel (stage 24: two
-new inputs carrying lifetime bite scars — accumulated stress and a
-recency-faded rancor toward the attacker's hue — with an off-switch so
-the pre-stage-24 default world still reads zeros; on the proto-culture
-world the channel is *causally read* (bit-identical until the first
-bite, then divergent) and even cuts predation deaths in 2/3 seeds, but
-halves the population in 3/3 — HARD GATE FAIL, default stays off,
-in `experiments/affect/`), and the territory bank (stage 25: surplus
-energy above the reproduce threshold banks itself into the creature's
-own complete house, the eat-gate mouth also withdraws from its own bank
-or raids an unguarded foreign one, a living owner within guard range
-makes the bank drain-proof, a mark ring stains the ground over banked
-houses, and standing on your own mark trims the metabolic bill — on the
-proto-culture world the mechanism demonstrably moves energy (2296 banked,
-61 raided, 45 marked cells on the surviving seed) and correlates with 4×
-the control's population there, but the off control itself goes extinct
-on the other seed, so the pre-registered hard gate fails for the
-*context*, not the treatment: a stable-context sweep is the honest next
-step, in `experiments/territory/`, with a `t` toggle for the territory
-overlay in the viewer). Known open
-problems are documented above (predation still a trickle, creatures still
-circle) rather than hidden.
+All planned stages are implemented. Stage 20 (old territory sketch) was
+absorbed by stage 25.
+
+| Stage | What landed | Verdict |
+|---|---|---|
+| 1 | World + food grid, headless tick, bench | 11k ticks/s at spawn sizes |
+| 2 | Brain MLP + ray sensors (Numba) | profile taken: perceive/think dominate |
+| 3 | Genome, mutation, energy-gated reproduction | free-list slots, shape pinned |
+| 4 | Pygame viewer: camera, zoom, brain panel | 26–47 fps at N=2000 |
+| 5 | Predation as an evolvable diet trait | works mechanically, inert (result 3) |
+| 6 | Stats recorder + matplotlib plots | ~0.5 ms/tick, off the hot path |
+| 7 | Save/load (npz v1) + genealogy log | continuation proven bit-identical |
+| 8 | Experiments, demo GIF, README, GitHub publish | 4 experiments, gates defined |
+| 9 | "World that teaches": patches, richer senses, Elman | GATE accepted by the user |
+| 9.5 | Balance: food economy, `turn_cost`, zoom | selection exists (famine bites) |
+| 10 | Environment: terrain, water, day/night, seasons | niches measured; growth recalibrated |
+| 11 | Biology: sex, senescence, carrion | GATE pass (3 seeds × 10k) |
+| 12 | Ecology: diet classes, genome clusters, barrier | speciation-lite; meat doubles barrier |
+| 13 | Signal channel: emit gate + smell inputs | selection closes expensive gates; default off |
+| 14 | Pheromone diffusion (Jacobi, mass-conserving) | trails are physical, still unread |
+| 15 | Neutral lineage hue + similarity sensor | structure 9–23× above null |
+| 16 | Donation output (nearest neighbour) | GATE pass; gifts align to kin 2.6–4.7× |
+| 17 | Civilization: wood, campfires, houses | fire survives; houses collapse the pop |
+| 18 | Default-price balance sweep | default world ends 1163/1170/821 |
+| 19 | Daemon + SQLite checkpoints/timeline | 23.5k ticks in 120 s, resume bit-identical |
+| 20 | *(old territory sketch — absorbed by 25)* | — |
+| 21 | Oja plasticity on a separate `dw`, evolvable η | control never wins; η selected against; default off |
+| 22 | Houses raised in deliveries, rot, hauling tax | honest null #2; default `houses_enabled = false` |
+| 23 | Off-tick hue-group observer + founder scenario | 4 groups hold, then drift to ~9 bands |
+| 24 | Affect inputs: lifetime stress + grudge | cuts predation, halves pop; HARD GATE FAIL, default off |
+| 25 | Territory: auto-deposit, guarded raids, mark + comfort | mechanism works (2296 banked); gate fails for the context |
+
+Known open problems — predation still a trickle, creatures still circle,
+experiment contexts still fragile — are documented above rather than hidden.
 
 ## License
 

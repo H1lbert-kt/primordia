@@ -111,7 +111,8 @@ Screening phase (6k) told the same story earlier: `proto` 9 alive,
 - **10k ticks is short for a channel nobody is selected to use.** The
   honest reading of `cheap` is "no evidence of use", not "evidence of no
   use": there is no task in this world that reading signal would help
-  with yet (stage 15 tag / stage 16 donation are the planned consumers).
+  with (stages 15 tag and 16 donation have since shipped — neither
+  consumes the signal field, so the channel still has no reader).
 - **One price point per class.** 0.5 and 2.0 bracket the collapse; 0.001
   brackets the spam floor. The actual affordable-price band is unknown.
 - **The `proto_culture.toml` price of 0.5 is now known to be economically
