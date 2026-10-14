@@ -24,7 +24,10 @@ profiler in ``bench``):
        house (u = 1) persists)
     7. age + metabolize (parallel over slots, alive only; energy drains by
        metabolic_cost * wear plus move_cost * |vel|^2, wear =
-       exp(senescence_rate * age), stage 11)
+       exp(senescence_rate * age), stage 11; standing on YOUR OWN
+       territorial mark discounts the metabolic bill by comfort, stage 25
+       — the mark is one tick stale, stamped by the previous tick's
+       phase 16)
     8. perceive         (parallel: rays + smells + internal -> sensor_buf;
        ray reach also divided by wear)
     9. think            (parallel: MLP forward -> hidden_buf, raw actions;
@@ -53,12 +56,18 @@ profiler in ``bench``):
         u lives in struct_store and the shelter scales with u; if
         house_fire_radius > 0 a live fire must burn within that radius)
     16. rebuild structure fields (zero + stamp: exact-cell occupancy,
-        fire heat radius, house cover stamped at completeness u —
+        fire heat radius, house cover stamped at completeness u, and the
+        stage-25 territorial mark ring around banked houses —
         a fire built this tick already cooks this tick: an object is
         not a signal, stage 17)
     17. eat             (serial: shared cells; food first, then carrion;
         extraction * gate; food eaten under fire earns cook_bonus x energy
-        paid 1:1 from that fire's fuel, stage 17 — never created energy)
+        paid 1:1 from that fire's fuel, stage 17 — never created energy;
+        stage 25 territory rides the same pass: surplus energy above the
+        deposit trigger banks into MY complete house at deposit_rate per
+        tick (automatic, no gate), and the same open mouth withdraws from
+        my bank or raids an UNGUARDED foreign one — the owner creature
+        alive within guard_range blocks the drain)
     18. bite            (serial: contact predation; gate * diet budget,
         energy transfer at bite_efficiency reduced by house cover, the
         dissipating share lands as carrion, prey at 0 energy is killed
@@ -119,6 +128,8 @@ def _age_and_metabolize(
     vel: np.ndarray,
     pos: np.ndarray,
     inventory: np.ndarray,
+    creature_id: np.ndarray,
+    mark_owner: np.ndarray,
     cost: np.float32,
     move_cost: np.float32,
     terrain: np.ndarray,
@@ -128,6 +139,7 @@ def _age_and_metabolize(
     senescence_rate: np.float32,
     carry_weight: np.float32,
     max_inventory: np.float32,
+    comfort: np.float32,
 ) -> None:
     """Age, then drain metabolism (x wear) plus movement (x water, stage 10).
 
@@ -137,6 +149,13 @@ def _age_and_metabolize(
     ``1 + carry_weight * inventory / max_inventory`` — wood is free to
     store, dear to carry, so supply lines price long builds. The branch
     is skipped entirely at ``carry_weight = 0`` (bit-identical world).
+
+    Territorial comfort (stage 25): standing on a cell of YOUR OWN mark
+    (``mark_owner == creature_id``) discounts the metabolic bill by
+    ``1 - comfort`` — a physical fact of place, never a reward. The mark
+    was stamped by phase 16 of the previous tick, so the discount lags
+    a newly claimed cell by one tick (documented latency, like emit).
+    ``comfort = 0`` skips the lookup entirely (bit-identical world).
     """
     gh = terrain.shape[0]
     gw = terrain.shape[1]
@@ -166,6 +185,8 @@ def _age_and_metabolize(
                 cy = gh - 1
             if terrain[cy, cx] == 0.0:
                 move = move * water_move_cost
+            if comfort > 0.0 and mark_owner[cy, cx] == creature_id[i]:
+                metabolic = metabolic * (np.float32(1.0) - comfort)
             energy[i] = energy[i] - metabolic - move
 
 
@@ -278,6 +299,80 @@ def _decay_structures(
 
 
 @njit(cache=True)
+def _owner_present(
+    pos: np.ndarray,
+    alive: np.ndarray,
+    creature_id: np.ndarray,
+    cell_offsets: np.ndarray,
+    cell_slots: np.ndarray,
+    hx: np.float32,
+    hy: np.float32,
+    inv_cell_w: np.float32,
+    inv_cell_h: np.float32,
+    gw: np.int32,
+    gh: np.int32,
+    width: np.float32,
+    height: np.float32,
+    reach_x: np.int32,
+    reach_y: np.int32,
+    owner_id: np.int32,
+    guard_range: np.float32,
+) -> bool:
+    """Stage 25 guard: is the house's owner creature alive within range?
+
+    Scans the CSR cells within ``guard_range`` (world units, toroidal) of
+    the house position for a living creature whose ``creature_id`` equals
+    ``owner_id`` — O(local cells), never O(N). The owner id is a monotonic
+    birth id, so a recycled slot never impersonates a dead owner. Any
+    living guard blocks the drain; the search is order-independent (a
+    boolean, not a nearest match).
+    """
+    hw = width * np.float32(0.5)
+    hh = height * np.float32(0.5)
+    range2 = guard_range * guard_range
+    ix0 = int(hx * inv_cell_w)
+    iy0 = int(hy * inv_cell_h)
+    if ix0 < 0:
+        ix0 = 0
+    elif ix0 >= gw:
+        ix0 = gw - 1
+    if iy0 < 0:
+        iy0 = 0
+    elif iy0 >= gh:
+        iy0 = gh - 1
+    for dy in range(-reach_y, reach_y + 1):
+        iy = iy0 + dy
+        while iy < 0:
+            iy = iy + gh
+        while iy >= gh:
+            iy = iy - gh
+        for dx in range(-reach_x, reach_x + 1):
+            ix = ix0 + dx
+            while ix < 0:
+                ix = ix + gw
+            while ix >= gw:
+                ix = ix - gw
+            k = iy * gw + ix
+            for p in range(cell_offsets[k], cell_offsets[k + 1]):
+                j = cell_slots[p]
+                if not alive[j] or creature_id[j] != owner_id:
+                    continue
+                ddx = hx - pos[j, 0]
+                if ddx > hw:
+                    ddx = ddx - width
+                elif ddx < -hw:
+                    ddx = ddx + width
+                ddy = hy - pos[j, 1]
+                if ddy > hh:
+                    ddy = ddy - height
+                elif ddy < -hh:
+                    ddy = ddy + height
+                if ddx * ddx + ddy * ddy <= range2:
+                    return True
+    return False
+
+
+@njit(cache=True)
 def _eat(
     pos: np.ndarray,
     energy: np.ndarray,
@@ -287,13 +382,33 @@ def _eat(
     actions: np.ndarray,
     struct_fire: np.ndarray,
     struct_fuel: np.ndarray,
+    struct_grid: np.ndarray,
+    struct_type: np.ndarray,
+    struct_pos: np.ndarray,
+    struct_alive: np.ndarray,
+    struct_owner: np.ndarray,
+    struct_deposit: np.ndarray,
+    struct_store: np.ndarray,
+    creature_id: np.ndarray,
+    cell_offsets: np.ndarray,
+    cell_slots: np.ndarray,
+    raid_of: np.ndarray,
     cell_w: np.float32,
     cell_h: np.float32,
     gw: np.int32,
     gh: np.int32,
+    width: np.float32,
+    height: np.float32,
     eat_rate: np.float32,
     cook_bonus: np.float32,
-) -> tuple[float, float]:
+    deposit_rate: np.float32,
+    raid_rate: np.float32,
+    deposit_trigger: np.float32,
+    deposit_floor: np.float32,
+    guard_range: np.float32,
+    reach_x: np.int32,
+    reach_y: np.int32,
+) -> tuple[float, float, float, float]:
     """Serial: shared food cells would make a parallel scatter a race.
 
     Food is drained first up to the gate-scaled budget; whatever the budget
@@ -302,13 +417,26 @@ def _eat(
     ``take * (cook_bonus - 1)`` extra energy, drained **from that fire's
     fuel** at 1:1 — fuel short of the claim pays the proportional bonus and
     then stops, so the eater's gain and the fuel's loss are always equal
-    and no energy is created. Carrion is never cooked (v1). Returns
-    ``(meat_eaten, energy_cooked)``; the caller adds them to
-    ``World.meat_eaten`` and ``World.energy_cooked``.
+    and no energy is created. Carrion is never cooked (v1).
+
+    Stage 25 (territory) rides the same pass. First, AUTOMATIC banking:
+    a creature whose energy exceeds ``deposit_trigger`` standing on its
+    OWN complete house moves ``min(deposit_rate, energy - deposit_floor)``
+    energy into ``struct_deposit`` — no gate, pure physics of place, and
+    the floor keeps enough to reproduce. Then, with the SAME open mouth
+    (eat gate > 0, budget independent of the food draw): withdrawal from
+    the creature's own bank at ``deposit_rate * gate``, or a raid of a
+    foreign bank at ``raid_rate * gate`` — blocked while the owner
+    creature is alive within ``guard_range`` of the house. Both flows
+    conserve world energy exactly (creature <-> deposit). Returns
+    ``(meat_eaten, energy_cooked, deposited, raided)``.
     """
     meat_eaten = np.float32(0.0)
     cooked = np.float32(0.0)
+    deposited = np.float32(0.0)
+    raided = np.float32(0.0)
     for i in range(alive.size):
+        raid_of[i] = -1
         if not alive[i]:
             continue
         cx = int(pos[i, 0] / cell_w)
@@ -321,6 +449,22 @@ def _eat(
             cy = 0
         elif cy >= gh:
             cy = gh - 1
+        slot = struct_grid[cy, cx]
+        # automatic banking (stage 25): surplus over the trigger moves into
+        # my own complete house, floored at the reproduce threshold
+        if deposit_rate > 0.0 and energy[i] > deposit_trigger and slot >= 0:
+            if (
+                struct_alive[slot]
+                and struct_type[slot] == 1
+                and struct_store[slot] >= 1.0  # only complete houses bank
+                and struct_owner[slot] == creature_id[i]
+            ):
+                room = energy[i] - deposit_floor
+                take = deposit_rate if deposit_rate < room else room
+                if take > 0.0:
+                    energy[i] = energy[i] - take
+                    struct_deposit[slot] = struct_deposit[slot] + take
+                    deposited = deposited + take
         budget = eat_rate * actions[i, 2]  # eat gate from the brain
         if budget <= 0.0:
             continue
@@ -350,7 +494,51 @@ def _eat(
             meat[cy, cx] = meat[cy, cx] - take_m
             energy[i] = energy[i] + take_m
             meat_eaten = meat_eaten + take_m
-    return meat_eaten, cooked
+        # stage 25: the open mouth also banks from / raids a complete house
+        # underfoot — independent of the food budget (conservation holds)
+        if slot < 0 or not struct_alive[slot] or struct_type[slot] != 1:
+            continue
+        hold = struct_deposit[slot]
+        if hold <= 0.0:
+            continue
+        if struct_owner[slot] == creature_id[i]:
+            take_d = deposit_rate * actions[i, 2]
+            if take_d > hold:
+                take_d = hold
+            if take_d > 0.0:
+                struct_deposit[slot] = hold - take_d
+                energy[i] = energy[i] + take_d
+                deposited = deposited + take_d
+        elif raid_rate > 0.0:
+            guarded = _owner_present(
+                pos,
+                alive,
+                creature_id,
+                cell_offsets,
+                cell_slots,
+                struct_pos[slot, 0],
+                struct_pos[slot, 1],
+                np.float32(1.0) / cell_w,
+                np.float32(1.0) / cell_h,
+                gw,
+                gh,
+                width,
+                height,
+                reach_x,
+                reach_y,
+                struct_owner[slot],
+                guard_range,
+            )
+            if not guarded:
+                take_r = raid_rate * actions[i, 2]
+                if take_r > hold:
+                    take_r = hold
+                if take_r > 0.0:
+                    struct_deposit[slot] = hold - take_r
+                    energy[i] = energy[i] + take_r
+                    raided = raided + take_r
+                    raid_of[i] = slot  # renderer-only flash, cleared each tick
+    return meat_eaten, cooked, deposited, raided
 
 
 @njit(cache=True)
@@ -889,6 +1077,8 @@ def phase_age_and_metabolize(world: World) -> None:
         world.vel,
         world.pos,
         world.inventory,
+        world.creature_id,
+        world.mark_owner,
         np.float32(cfg.metabolic_cost),
         np.float32(cfg.move_cost),
         world.terrain,
@@ -898,6 +1088,7 @@ def phase_age_and_metabolize(world: World) -> None:
         np.float32(cfg.senescence_rate),
         np.float32(cfg.carry_weight),
         np.float32(cfg.max_inventory),
+        np.float32(cfg.comfort),
     )
 
 
@@ -963,6 +1154,14 @@ def phase_perceive(world: World) -> None:
         np.float32(cfg.stress_scale),
         np.float32(cfg.grudge_decay),
         cfg.affect_enabled,
+        world.struct_grid,
+        world.struct_type,
+        world.struct_alive,
+        world.struct_owner,
+        world.struct_deposit,
+        world.struct_store,
+        world.creature_id,
+        np.float32(cfg.store_scale),
     )
 
 
@@ -1168,7 +1367,13 @@ def phase_rebuild_struct_fields(world: World) -> None:
 def phase_eat(world: World) -> None:
     cfg = world.config
     gh, gw = world.food.shape
-    meat_eaten, energy_cooked = _eat(
+    # Cells to scan per axis for the guard check (largest guard_range can
+    # never be missed across cell edges; same reach formula as donate).
+    reach_x = int(cfg.guard_range // float(world.cell_w)) + 1
+    reach_y = int(cfg.guard_range // float(world.cell_h)) + 1
+    reach_x = min(reach_x, gw // 2)
+    reach_y = min(reach_y, gh // 2)
+    meat_eaten, energy_cooked, deposited, raided = _eat(
         world.pos,
         world.energy,
         world.alive,
@@ -1177,15 +1382,37 @@ def phase_eat(world: World) -> None:
         world.actions,
         world.struct_fire,
         world.struct_fuel,
+        world.struct_grid,
+        world.struct_type,
+        world.struct_pos,
+        world.struct_alive,
+        world.struct_owner,
+        world.struct_deposit,
+        world.struct_store,
+        world.creature_id,
+        world.cell_offsets,
+        world.cell_slots,
+        world.raid_of,
         world.cell_w,
         world.cell_h,
         np.int32(gw),
         np.int32(gh),
+        np.float32(cfg.width),
+        np.float32(cfg.height),
         np.float32(cfg.eat_rate),
         np.float32(cfg.cook_bonus),
+        np.float32(cfg.deposit_rate),
+        np.float32(cfg.raid_rate),
+        np.float32(cfg.reproduce_threshold * cfg.deposit_threshold_frac),
+        np.float32(cfg.reproduce_threshold),
+        np.float32(cfg.guard_range),
+        np.int32(reach_x),
+        np.int32(reach_y),
     )
     world.meat_eaten += float(meat_eaten)
     world.energy_cooked += float(energy_cooked)
+    world.deposited += float(deposited)
+    world.raided += float(raided)
 
 
 @njit(cache=True)

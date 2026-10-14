@@ -21,12 +21,18 @@ never resized. Array dtypes are part of the module contract:
     struct_fuel (S,) float32, struct_store (S,) float32 (unused for
         fires; house completeness u in [0, 1] since stage 22 — the
         shelter stamped on the ground is cover_reduction * u),
+    struct_deposit (S,) float32 (energy banked in the structure since
+        stage 25; fires always 0 — only a complete house accepts deposits),
     struct_owner (S,) int32
         (builder's creature id), struct_alive (S,) bool,
     struct_free_list (S,) int32   # stage-17 structures, fixed capacity S
-    struct_grid/struct_fire (H,W) int32, fire_heat/cover (H,W) float32
+    struct_grid/struct_fire (H,W) int32, fire_heat/cover (H,W) float32,
+    mark (H,W) float32, mark_owner (H,W) int32
         (per-tick structure scratch, rebuilt by rebuild_struct_fields,
-        never saved),
+        never saved — stage 25 territorial ring: mark is a binary 1.0
+        inside house_radius of a house holding more than mark_threshold,
+        mark_owner is that house's owner creature id; overlapping rings
+        are won by the highest structure slot, ascending order)
     cell_counts (H,W) int32,
     cell_diet (H,W) float32, cell_offsets (H*W+1,) int32,
     cell_tag_re/im (H,W) float32,  # per-cell (cos,sin) of tag_hue, stage 15
@@ -156,11 +162,15 @@ def _stamp_structures(
     struct_pos: np.ndarray,
     struct_type: np.ndarray,
     struct_store: np.ndarray,
+    struct_deposit: np.ndarray,
     struct_alive: np.ndarray,
     struct_grid: np.ndarray,
     struct_fire: np.ndarray,
     fire_heat: np.ndarray,
     cover: np.ndarray,
+    mark: np.ndarray,
+    mark_owner: np.ndarray,
+    struct_owner: np.ndarray,
     cell_w: np.float32,
     cell_h: np.float32,
     gw: np.int32,
@@ -169,6 +179,7 @@ def _stamp_structures(
     height: np.float32,
     fire_radius: np.float32,
     house_radius: np.float32,
+    mark_threshold: np.float32,
 ) -> None:
     """Stamp alive structures into the per-tick grids (serial, stage 17).
 
@@ -180,6 +191,13 @@ def _stamp_structures(
     with a toroidal delta (``fire_radius = 0`` keeps only the exact cell).
     Houses stamp their completeness ``struct_store`` (0..1, stage 22)
     with a max-merge, so cover is the shelter share, never more than 1.
+
+    Stage 25 (territory): a house holding more than ``mark_threshold``
+    energy also stamps a binary territorial ring ``mark = 1.0`` within
+    ``house_radius``, recording its owner id in ``mark_owner``. Plain
+    assignment in ascending slot order means the *highest* overlapping
+    slot owns a contested cell (deterministic; the comfort check asks
+    "is this MY mark", so at most one owner ever reads a cell as home).
     """
     hw = width * np.float32(0.5)
     hh = height * np.float32(0.5)
@@ -231,6 +249,8 @@ def _stamp_structures(
             ix1 = int((x + r) / cell_w)
             iy0 = int((y - r) / cell_h)
             iy1 = int((y + r) / cell_h)
+            banked = struct_deposit[s] > mark_threshold
+            owner = struct_owner[s]
             for iy in range(iy0, iy1 + 1):
                 dy = (np.float32(iy) + np.float32(0.5)) * cell_h - y
                 if dy > hh:
@@ -252,6 +272,9 @@ def _stamp_structures(
                         v = struct_store[s]
                         if v > cover[jy, jx]:
                             cover[jy, jx] = v
+                        if banked:
+                            mark[jy, jx] = 1.0
+                            mark_owner[jy, jx] = owner
 
 
 class World:
@@ -332,9 +355,12 @@ class World:
         self.struct_pos = np.zeros((s, 2), dtype=np.float32)
         self.struct_type = np.zeros(s, dtype=np.uint8)
         self.struct_fuel = np.zeros(s, dtype=np.float32)
-        # Deposit slot: written at build time (starts 0), but no rule reads
-        # it until the territory stage — kept in the save so state is whole.
+        # Completeness u in [0, 1] for houses (stage 22; fires keep 0).
         self.struct_store = np.zeros(s, dtype=np.float32)
+        # Energy banked in the structure (stage 25): only a complete house
+        # accepts deposits (the builder's surplus at deposit_rate per tick);
+        # fires always hold 0. Saved — a banked house is real world energy.
+        self.struct_deposit = np.zeros(s, dtype=np.float32)
         self.struct_owner = np.full(s, -1, dtype=np.int32)
         self.struct_alive = np.zeros(s, dtype=bool)
         self.struct_free_list = np.arange(s, dtype=np.int32)
@@ -347,6 +373,11 @@ class World:
         self.struct_fire = np.full((gh, gw), -1, dtype=np.int32)
         self.fire_heat = np.zeros((gh, gw), dtype=np.float32)
         self.cover = np.zeros((gh, gw), dtype=np.float32)
+        # Territorial mark (stage 25): binary 1.0 ring around a banked
+        # house, plus the owning creature id per cell. Scratch like cover:
+        # rebuilt every tick, never saved (rebuild_struct_fields on load).
+        self.mark = np.zeros((gh, gw), dtype=np.float32)
+        self.mark_owner = np.full((gh, gw), -1, dtype=np.int32)
 
         # Ray fan as unit vectors of the fovea-relative offsets; each creature
         # rotates this table by its angle (one sin/cos per creature, not per ray).
@@ -382,6 +413,12 @@ class World:
         # Total extra energy ever granted by cooking, i.e. the fuel burned
         # to pay for it (stage 17 conservation metric): float64, saved.
         self.energy_cooked = 0.0
+        # Total energy ever banked into houses (stage 25 gate metric);
+        # float64, saved as a scalar in io.py, same pattern.
+        self.deposited = 0.0
+        # Total energy ever raided out of unguarded foreign houses (stage 25
+        # gate metric): float64, saved, same pattern.
+        self.raided = 0.0
         # Cumulative bites by the *attacker's* diet class (stage 12.5):
         # [herbivore (< HERB_MAX), omnivore, predator (> PRED_MIN)] — the
         # measurement buckets of ecology.py, int64 counts of successful
@@ -403,6 +440,12 @@ class World:
         # lines from it, so recording stays bit-identical to headless.
         # Diagnostic scratch, not saved (io.py), like bite_by_diet.
         self.donate_to = np.full(config.max_creatures, -1, dtype=np.int32)
+        # Per-tick raid map for the renderer (stage 25): raider slot ->
+        # structure slot raided this tick, -1 otherwise, rewritten every
+        # tick by the eat phase (always cleared). Same contract as
+        # donate_to: the simulation never reads it, recording stays
+        # bit-identical to headless, not saved (io.py).
+        self.raid_of = np.full(config.max_creatures, -1, dtype=np.int32)
         # Affect scratches (stage 24): what a bite leaves on the victim.
         # ``stress`` accumulates the landed energy of every bite and decays
         # exponentially each tick; ``attacker_hue`` is the tag_hue of the
@@ -559,26 +602,33 @@ class World:
         )
 
     def rebuild_struct_fields(self) -> None:
-        """Zero and re-stamp the stage-17 structure grids (phase 15 + load).
+        """Zero and re-stamp the structure grids (phase 16 + load).
 
         ``struct_grid`` (exact-cell occupancy), ``struct_fire`` (which fire
-        heats/pays for each cell), ``fire_heat`` and ``cover`` are scratch:
-        rebuilt from the structure arrays, never saved. Numpy fills the
-        grids (C-speed), the kernel only stamps.
+        heats/pays for each cell), ``fire_heat``, ``cover`` and, since
+        stage 25, ``mark``/``mark_owner`` (the territorial ring) are
+        scratch: rebuilt from the structure arrays, never saved. Numpy
+        fills the grids (C-speed), the kernel only stamps.
         """
         self.struct_grid.fill(-1)
         self.struct_fire.fill(-1)
         self.fire_heat.fill(0.0)
         self.cover.fill(0.0)
+        self.mark.fill(0.0)
+        self.mark_owner.fill(-1)
         _stamp_structures(
             self.struct_pos,
             self.struct_type,
             self.struct_store,
+            self.struct_deposit,
             self.struct_alive,
             self.struct_grid,
             self.struct_fire,
             self.fire_heat,
             self.cover,
+            self.mark,
+            self.mark_owner,
+            self.struct_owner,
             self.cell_w,
             self.cell_h,
             np.int32(self.food.shape[1]),
@@ -587,6 +637,7 @@ class World:
             np.float32(self.config.height),
             np.float32(self.config.fire_radius),
             np.float32(self.config.house_radius),
+            np.float32(self.config.mark_threshold),
         )
 
     def spawn(self, count: int) -> np.ndarray:

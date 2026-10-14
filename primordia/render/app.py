@@ -36,8 +36,10 @@ from .draw import (
     pick_creature,
     pixel_format,
     render_flashes,
+    render_raids,
     render_transfers,
     stamp_creatures,
+    stamp_deposit_bars,
     stamp_structures,
 )
 from .panel import Hud, clear_font_cache, draw_event_log, render_panel
@@ -80,6 +82,44 @@ def _rebuild_group_overlay(
             other = np.roll(owner, shift, axis=axis)
             diff |= occupied & (other >= 0) & (other != owner)
     group_alpha[occupied & diff, 0] = settings.group_border_alpha
+
+
+def _rebuild_territory_overlay(
+    world,
+    mark_rgb: np.ndarray,
+    mark_alpha: np.ndarray,
+    settings: Settings,
+) -> None:
+    """Fill the territorial wash grids from this tick's mark scratch.
+
+    Each marked cell is tinted with its owner's tag hue (the same circular
+    colour creatures already wear as rings, so the ring on the ground and
+    the ring on the sprite match); a mark whose owner has since died falls
+    back to a dim neutral gray (the deposit persists, the creature does
+    not). ``mark``/``mark_owner`` are tick-fresh scratch, so this must run
+    every frame while the overlay is on — unlike the 30-frame-cached group
+    observer. Viewer-only; the world is untouched.
+    """
+    mark = world.mark
+    owner = world.mark_owner
+    occupied = mark > 0.5
+    mark_rgb.fill(0.0)
+    mark_alpha.fill(0.0)
+    if not occupied.any():
+        return
+    lut = hue_lut()
+    alive = world.alive
+    ids = world.creature_id[alive]
+    hues = world.genome[alive, world.config.brain_params + 4]
+    hue_of = {int(i): float(h) for i, h in zip(ids, hues) if i >= 0}
+    gray = np.array([0.45, 0.45, 0.48], dtype=np.float32)
+    for oid in np.unique(owner[occupied]):
+        cells = owner == oid
+        hue = hue_of.get(int(oid))
+        mark_rgb[cells] = (
+            lut[(int(hue * 255.0) & 255)] if hue is not None else gray
+        )
+    mark_alpha[occupied, 0] = settings.territory_overlay_alpha
 
 
 def run_app(
@@ -135,10 +175,13 @@ def run_app(
     cluster_label_of_slot: np.ndarray | None = None
     observer = GroupObserver(cfg)
     show_groups = settings.show_groups
+    show_territory = settings.show_territory
     snapshot: GroupSnapshot | None = None
     gh, gw = world.food.shape
     group_rgb = np.zeros((gh, gw, 3), dtype=np.float32)
     group_alpha = np.zeros((gh, gw, 1), dtype=np.float32)
+    mark_rgb = np.zeros((gh, gw, 3), dtype=np.float32)
+    mark_alpha = np.zeros((gh, gw, 1), dtype=np.float32)
     paused = False
     speed_index = 0
     follow = selected >= 0  # a preset selection starts tracking its creature
@@ -177,6 +220,8 @@ def run_app(
                         follow = not follow
                 elif event.key == pygame.K_g:
                     show_groups = not show_groups
+                elif event.key == pygame.K_t:
+                    show_territory = not show_territory
                 elif event.key == pygame.K_ESCAPE:
                     selected, follow = -1, False
                 elif event.key == pygame.K_F12 and screenshot_path:
@@ -251,7 +296,13 @@ def run_app(
             g_alpha: np.ndarray | None = group_alpha
         else:
             g_rgb = g_alpha = None
-        draw_world(pixels, world, camera, food_lut, terrain_lut, wood_lut, light, shifts, buffers, settings.meat_color, settings.signal_color, g_rgb, g_alpha)
+        if show_territory:
+            _rebuild_territory_overlay(world, mark_rgb, mark_alpha, settings)
+            m_rgb: np.ndarray | None = mark_rgb
+            m_alpha: np.ndarray | None = mark_alpha
+        else:
+            m_rgb = m_alpha = None
+        draw_world(pixels, world, camera, food_lut, terrain_lut, wood_lut, light, shifts, buffers, settings.meat_color, settings.signal_color, g_rgb, g_alpha, m_rgb, m_alpha)
         stamp_structures(pixels, world, camera, settings, shifts, light)
         stamp_creatures(pixels, world, camera, settings, shifts, light)
         del pixels
@@ -265,6 +316,8 @@ def run_app(
             )
         render_flashes(overlay, event_tracker.flashes, camera, settings)
         render_transfers(overlay, event_tracker.transfers, camera, settings)
+        render_raids(overlay, event_tracker.raid_lines, camera, settings)
+        stamp_deposit_bars(overlay, world, camera, settings)
         world_surface.blit(overlay, (0, 0))
         draw_overlay(world_surface, world, camera, selected, settings)
         if show_groups:

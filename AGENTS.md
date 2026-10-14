@@ -14,8 +14,82 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   README principal em **inglês**.
 
 ## Estado atual do repositório (verificado em 2026-10-13)
-- **Etapa 24 ("estresse+rancor") concluída (código + testes + bench +
-  experimento; commit pendente de `/cp`):** plano em
+- **Etapa 25 ("território revisado") concluída (código + testes + bench +
+  experimento + docs; commit desta etapa):** plano em
+  `.opencode/plans/etapa-25-territorio-revisado.md` (absorve a etapa 20
+  antiga; decisões fechadas pelo usuário incl. 1 input assinado `store`).
+  **Núcleo:** `struct_deposit (S,) float32` novo array **salvo** (a
+  etapa 22 reocupou `struct_store` como completude `u`); depósito
+  **automático** em `_eat` (sem saída nova): creature com
+  `energy > reproduce_threshold·deposit_threshold_frac` na própria casa
+  completa (`u≥1`, `type=1`, owner==creature_id) drene
+  `min(deposit_rate, energy−floor)/tick`, floor = reproduce_threshold
+  (preserva a capacidade de reproduzir); **saque/roubo** = eat-gate
+  (output 2) após o desconto de comida, independente do orçamento de
+  comida (boca aberta = come E saca/rouba, conservação mantida);
+  **guarda** = `_owner_present` (busca CSR local, reach
+  `int(guard_range//cell)+1` capped `gw//2`, posição da casa
+  `struct_pos[slot]`, dono vivo ≤ guard_range → dreno externo zero);
+  **conforto** em `_age_and_metabolize` com `mark_owner==creature_id`
+  (`metabolic·(1−comfort·own_mark)`, latência 1 tick — mark stampado na
+  fase 16). **Marca:** `mark (H,W) float32` + `mark_owner (H,W) int32`
+  scratch (rebuild, **não salvos**), binária 1.0 dentro `house_radius`
+  para casas com `deposit > mark_threshold`; sobreposição → slot mais
+  alto vence (ordem ascendente, documentado). **Input `store`** em
+  `3n+16` (=37): `+min(deposit, store_scale)/store_scale` na MINHA casa
+  completa, `−` em casa alheia, `0` no resto (e só lê casas completas —
+  guarda `struct_store≥1` adicionada ao sensor e ao depósito). **Layout:
+  38 in / brain 448 / genoma 454 / plástico 368.** **`FORMAT_VERSION`
+  11→12** (`struct_deposit` + contadores `deposited`/`raided` float64;
+  v1–v11 → ValueError). **Neutro = off:** `deposit_rate=0` (e
+  raid/comfort 0) ⇒ mundo **bit-idêntico** (input store lê 0 exato, sem
+  RNG, sem branch de Config). Defaults: `deposit_rate=0.5,
+  raid_rate=0.3, guard_range=3.0, comfort=0.3, mark_threshold=1.0,
+  deposit_threshold_frac=1.1, store_scale=100.0` + validações
+  (rates/guard/mark/store ≥ 0, comfort ∈ [0,1], frac > 0). **Contadores
+  salvos:** `deposited`, `raided`; **scratch** `raid_of (N,) int32`
+  (raider→struct slot, limpo por tick, só render). **Stats:** deltas
+  `deposited`/`raided`, gauges `energy_in_stores` (soma dos depósitos de
+  casas vivas) e `mark_cells`. **Render:** overlay território
+  **default-off** (tecla `t`, `_rebuild_territory_overlay` por frame —
+  mark é scratch tick-fresh, ao contrário do observer de 30 frames; hue
+  por dono via `creature_id→tag_hue`, morto → cinza), barras de depósito
+  (`stamp_deposit_bars` no overlay SRCALPHA, escala `deposit_bar_scale=20`
+  — UI, não Config), flash de roubo (`EventTracker.raid_lines` +
+  `render_raids`, laranja `flash_raid`, lifecycle igual ao donation);
+  `draw_world` ganhou `mark_rgb/mark_alpha` opcionais (default intocado);
+  painel só ganhou ` t terr` na linha de ajuda (zero altura). **Fix
+  próprio pego pelo teste:** depósito escrevia em casa incompleta
+  (guarda `struct_store≥1` adicionada ao `_eat`); sensor `store` lia
+  depósito em fogo (guarda `type==1` + `u≥1` adicionada). **Testes: 311
+  passed** — `tests/test_territory.py` (22: posse, conservação,
+  conforto, off≡baseline, determinismo, save/load v12, input store
+  +/−/0/fogo, pins 38/448/454/368, validações, raid flash lifecycle,
+  overlay purity, deposit-bar skip, raid color) + pins atualizados em
+  brain/civilization/donation/signals/affect/tag. **Bench (load 2.5–3.0):
+  617/318/162 t/s** a 500/2000/5000 (piso 30 @N=2000 com ~10×; sem
+  fase nova, só leituras/escritas nos kernels existentes). Screenshots
+  `/tmp/opencode/stage25_territory.png` (marca lavanda + barras verdes)
+  e `stage25_zoom.png`. **Experimento `experiments/territory/`**
+  (proto_culture + knobs de casa da etapa 22; off vs store, seeds 42/7
+  × 10k, pré-registrado): **HARD GATE FAIL para o CONTEXTO, não o
+  tratamento** — o controle `off` **extinge** na seed 7 (@5248, 522
+  fomes, contexto casa+fome marginal), então nenhum variante de
+  território poderia passar o gate registrado. Na seed estável 42 o
+  mecanismo **funciona**: deposited 2296, raided 61 (265 ticks, 1º @434,
+  pico 0.57/tick), banco 161/317, marcas 26/45, e a pop `store` termina
+  **4× o controle** (116 vs 29, nascimentos 385 vs 155 — conforto+banco
+  são vantagem real em mundo dominado por fome; trajetória, não efeito
+  randomizado). Seed 7 store também banca 321 antes de extinguir @6616
+  (depois do controle). Veredito honesto: null pré-registrado, mas
+  null de **estabilidade de contexto**, não de mecanismo inerte —
+  próximo passo = sweep de preço/economia com o usuário (lição 17/18).
+  README do experimento com 6 limitações. README principal: 454/38/311
+  testes, bench 25, roadmap 1–24+25, bloco de reprodutibilidade com o
+  bump v12. **Próximo passo:** decidir o follow-up do território
+  (sweep de contexto) ou nova etapa.
+- **Etapa 24 ("estresse+rancor") concluída e commitada (`6413cc6` em
+  origin/master; código + testes + bench + experimento):** plano em
   `.opencode/plans/etapa-24-estados-afetivos.md` (**números corrigidos
   no chat: 37 in + hidden 8 → brain 440, genoma 446, plástico 360 — o
   arquivo do plano ainda diz 448/454, stale**). **Núcleo:** dois inputs
@@ -55,7 +129,7 @@ com demo visual, experimentos reproduzíveis e resultados documentados.
   (n=3, stress+grudge casados, um mundo, preços não swept, caos
   tardio, min-alive do controle seed13 já <30). README principal:
   446/37/289 testes, roadmap 1–19+21+22+23+24, bloco de
-  reprodutibilidade com o bump v11. **Próximo passo: `/cp`**, depois
+  reprodutibilidade com o bump v11. **Próximo passo já executado:**
   etapa 25 (território revisado).
 - **Etapa 23 ("observador de grupos + cenário fundador") concluída e
   commitada (`4e2eb44` em origin/master):**
@@ -1174,9 +1248,12 @@ default off; `a55f134`) → 23 observador de grupos + cenário fundador ✓
 (nulo publicável; commitada `4e2eb44`) → 24 estados afetivos
 (estresse+rancor ✓ — hidden 9→8, 37 in, brain 440, genoma 446,
 `FORMAT_VERSION` 10→11, HARD GATE FAIL publicado, default off; commit
-pendente de `/cp`) →
-25 território revisado (absorve a antiga etapa 20; `struct_deposit`).
-**Próximo passo:** `/cp` da etapa 24, depois etapa 25 (a decidir pelo
-usuário / executar sob pedido).
+pendente de `/cp`) → 25 território revisado ✓ (absorve a antiga etapa 20; `struct_deposit`, input `store`, 38 in / brain 448 / genoma 454,
+`FORMAT_VERSION` 11→12, overlay `t` default-off; HARD GATE FAIL para o
+**contexto** (controle extinge em 1 seed), mecanismo medido funcionando
+na seed estável — banco 2296 / roubo 61 / marcas 45, pop 4× o controle;
+null publicado).
+**Próximo passo:** decidir o follow-up (sweep de contexto do território
+com o usuário / nova etapa).
 
 Trabalhe **apenas na etapa que o usuário indicar**.

@@ -281,19 +281,22 @@ def draw_world(
     signal_color: tuple[int, int, int] = (150, 90, 220),
     group_rgb: np.ndarray | None = None,
     group_alpha: np.ndarray | None = None,
+    mark_rgb: np.ndarray | None = None,
+    mark_alpha: np.ndarray | None = None,
 ) -> None:
-    """Write terrain + wood + food + carrion + signal (+ groups) into ``pixels``.
+    """Write terrain + wood + food + carrion + signal (+ groups + marks).
 
-    Per cell: ``rgb = lerp(lerp(lerp(lerp(lerp(terrain, wood, a_w), food, a_f),
-    meat, a_m), signal, a_s), group, a_g) * light`` with ``a_w = wood /
-    wood_capacity`` (stage 17 — the brown litter sits over the ground and
-    under the food, so harvesting reveals it the way depletion reveals
-    terrain), then ``a_f = food / capacity``, ``a_m = clip(meat / capacity,
-    0, 1)``, ``a_s = clip(signal / signal_capacity, 0, 1)`` and, when the
-    stage-23 observer overlay is on, the precomputed country fill
-    ``group_rgb`` with per-cell ``group_alpha`` (both None = the exact
-    pre-stage-23 path). The blend runs on the 200x200 cell grid once per
-    frame; the viewport step is the same single gather as before.
+    Per cell: ``rgb = lerp(lerp(lerp(lerp(lerp(lerp(terrain, wood, a_w),
+    food, a_f), meat, a_m), signal, a_s), group, a_g), mark, a_mk) * light``
+    with ``a_w = wood / wood_capacity`` (stage 17 — the brown litter sits
+    over the ground and under the food, so harvesting reveals it the way
+    depletion reveals terrain), then ``a_f = food / capacity``,
+    ``a_m = clip(meat / capacity, 0, 1)``, ``a_s = clip(signal /
+    signal_capacity, 0, 1)``, the stage-23 country fill and the stage-25
+    territorial wash (each a precomputed ``*_rgb`` + per-cell ``*_alpha``,
+    both None = the exact pre-stage-23/25 path). The blend runs on the
+    200x200 cell grid once per frame; the viewport step is the same single
+    gather as before.
     """
     cap = float(world.config.food_capacity)
     f_idx = np.clip(world.food * (255.0 / cap), 0.0, 255.0).astype(np.intp)
@@ -316,6 +319,8 @@ def draw_world(
     rgb = rgb + (sig_rgb - rgb) * sig_a
     if group_rgb is not None and group_alpha is not None:
         rgb = rgb + (group_rgb - rgb) * group_alpha
+    if mark_rgb is not None and mark_alpha is not None:
+        rgb = rgb + (mark_rgb - rgb) * mark_alpha
     rgb *= float(light)
     np.clip(rgb, 0.0, 255.0, out=rgb)
     cell_pixels = rgb_to_pixel(rgb.astype(np.uint8), shifts)
@@ -574,6 +579,10 @@ class EventTracker:
         # per-tick world.donate_to map: donor -> [recipient, frames_since_last_gift]
         self._gifts: dict[int, list[int]] = {}
         self.transfers: list[Transfer] = []
+        # raid lines (stage 25): raider -> [struct_slot, frames_since_last_raid]
+        # rebuilt each update from the per-tick world.raid_of map
+        self._raids: dict[int, list[int]] = {}
+        self.raid_lines: list[Transfer] = []
 
     @staticmethod
     def _counters(world) -> tuple[int, int, int]:
@@ -621,6 +630,7 @@ class EventTracker:
         self.prev_alive = alive.copy()
         self.prev_counters = self._counters(world)
         self._update_transfers(world, settings)
+        self._update_raids(world, settings)
 
     def _update_transfers(self, world, settings: Settings) -> None:
         """Rebuild the donor->recipient gift lines from the tick's map.
@@ -656,6 +666,43 @@ class EventTracker:
                 age,
             )
             for d, (r, age) in self._gifts.items()
+        ]
+
+    def _update_raids(self, world, settings: Settings) -> None:
+        """Rebuild raider->house raid lines from the tick's ``raid_of`` map.
+
+        Same lifecycle as donations: an active raider resets to age 0 each
+        frame (line tracks the live raider position against the fixed house
+        position), then fades over ``flash_duration``. A dead raider expires
+        immediately. The house end is ``struct_pos``, not a creature, so it
+        never moves; the line therefore mostly shortens as the raider walks
+        away after the theft.
+        """
+        raid_map = world.raid_of
+        alive = world.alive
+        active = {int(r): int(raid_map[r]) for r in np.flatnonzero(raid_map >= 0)}
+        for r, s in active.items():
+            self._raids[r] = [s, 0]
+        for r in list(self._raids):
+            if r in active:
+                continue
+            if r >= alive.size or not alive[r]:
+                del self._raids[r]
+                continue
+            self._raids[r][1] += 1
+            if self._raids[r][1] >= settings.flash_duration:
+                del self._raids[r]
+        pos = world.pos
+        sp = world.struct_pos
+        self.raid_lines = [
+            Transfer(
+                float(pos[r, 0]),
+                float(pos[r, 1]),
+                float(sp[s, 0]),
+                float(sp[s, 1]),
+                age,
+            )
+            for r, (s, age) in self._raids.items()
         ]
 
     def _death_color(self, world, settings: Settings) -> tuple[int, int, int]:
@@ -740,22 +787,17 @@ def render_flashes(
         pygame.draw.circle(overlay, color, (cx, cy), radius)
 
 
-def render_transfers(
+def _draw_transfer_lines(
     overlay: pygame.Surface,
     transfers: list[Transfer],
+    color: tuple[int, int, int],
     camera: Camera,
     settings: Settings,
 ) -> None:
-    """Cyan donor->recipient gift lines (stage 16), fading with age.
-
-    Fresh gifts (age 0, the ones the tick just made) draw slightly
-    thicker; older lines thin out and fade as ``age`` approaches
-    ``flash_duration``. Skip entirely when nothing donated — the default
-    donate_rate is 0, so this is a no-op in vanilla runs.
-    """
+    """Shared fade/skip/wrap logic for donor->recipient and raider->house
+    lines (stages 16 and 25). Fresh endpoints (age 0) draw thicker."""
     if not transfers:
         return
-    color = settings.flash_donation
     duration = max(1, settings.flash_duration)
     half_w = camera.world_width * 0.5
     half_h = camera.world_height * 0.5
@@ -780,3 +822,78 @@ def render_transfers(
             p2,
             2 if t.age == 0 else 1,
         )
+
+
+def render_transfers(
+    overlay: pygame.Surface,
+    transfers: list[Transfer],
+    camera: Camera,
+    settings: Settings,
+) -> None:
+    """Cyan donor->recipient gift lines (stage 16), fading with age.
+
+    Fresh gifts (age 0, the ones the tick just made) draw slightly
+    thicker; older lines thin out and fade as ``age`` approaches
+    ``flash_duration``. Skip entirely when nothing donated — the default
+    donate_rate is 0, so this is a no-op in vanilla runs.
+    """
+    _draw_transfer_lines(overlay, transfers, settings.flash_donation, camera, settings)
+
+
+def render_raids(
+    overlay: pygame.Surface,
+    raid_lines: list[Transfer],
+    camera: Camera,
+    settings: Settings,
+) -> None:
+    """Orange raider->house theft lines (stage 25), fading with age.
+
+    Same lifecycle and wrap-skip as donations; the house endpoint is fixed
+    (``struct_pos``), so the line shortens as the raider walks away after
+    the theft. No-op when nothing raided this frame.
+    """
+    _draw_transfer_lines(overlay, raid_lines, settings.flash_raid, camera, settings)
+
+
+def stamp_deposit_bars(
+    overlay: pygame.Surface,
+    world,
+    camera: Camera,
+    settings: Settings,
+) -> None:
+    """Small horizontal fill bar over each banked house (stage 25).
+
+    Drawn on the SRCALPHA overlay so the bar reads over the terrain and the
+    house sprite without fighting the packed-pixel path in
+    :func:`stamp_structures`. The fill is ``clip(deposit /
+    deposit_bar_scale, 0, 1)`` — a presentation scale, deliberately NOT
+    ``Config.mark_threshold`` (that is a balance knob, not a UI one). Only
+    complete houses (``struct_store >= 1``) with a non-empty bank draw a
+    bar; fires and unbuilt candidates are skipped.
+    """
+    alive_slots = np.flatnonzero(world.struct_alive)
+    if alive_slots.size == 0:
+        return
+    is_house = world.struct_type[alive_slots] == 1
+    complete = world.struct_store[alive_slots] >= 1.0
+    banked = world.struct_deposit[alive_slots] > 0.0
+    draw = alive_slots[is_house & complete & banked]
+    if draw.size == 0:
+        return
+    scale = max(float(settings.deposit_bar_scale), 1e-6)
+    frac = np.clip(world.struct_deposit[draw] / scale, 0.0, 1.0)
+    sx, sy = camera.world_to_screen(world.struct_pos[draw])
+    w = settings.deposit_bar_width
+    h = settings.deposit_bar_height
+    bg = settings.deposit_bar_bg
+    fg = settings.deposit_bar_color
+    for i in range(draw.size):
+        cx, cy = int(sx[i]), int(sy[i])
+        x0 = cx - w // 2
+        y0 = cy - h - 3  # just above the house sprite
+        pygame.draw.rect(overlay, (bg[0], bg[1], bg[2], 160), (x0, y0, w, h))
+        fill = int(round(w * float(frac[i])))
+        if fill > 0:
+            pygame.draw.rect(
+                overlay, (fg[0], fg[1], fg[2], 210), (x0, y0, fill, h)
+            )

@@ -97,11 +97,10 @@ class Config:
     smell_radius_cells: int = 1  # (2r+1)^2 cells sensed around the creature
 
     # --- brain ---
-    # Stage 24: 37 inputs (the affect pair stress/grudge appended) fit the
-    # 100-500 budget only at hidden 8 — brain_params = 8*38 + 8*9 + 8*8 =
-    # 440, genome = 446. Hidden 9 would cost 9*38 + 8*10 + 9*9 = 503, over
-    # budget; the 11% capacity cut (W_rec 81 -> 64) is the price of the two
-    # new senses.
+    # Stage 25: 38 inputs (the signed store reading appended) fit the
+    # 100-500 budget only at hidden 8 — brain_params = 8*39 + 8*9 + 8*8 =
+    # 448, genome = 454. Hidden 9 would cost 9*39 + 8*10 + 9*9 = 512, over
+    # budget.
     hidden_size: int = 8
     weight_init_std: float = 0.5  # std of N(0, std) weights drawn at spawn
 
@@ -363,6 +362,30 @@ class Config:
     # tag (stage 15): the brain sees who hit it, not a scoreboard.
     grudge_decay: float = 0.01
 
+    # --- territory (stage 25: possession, savings and comfort — no reward) ---
+    # A complete house (u = 1, immortal since stage 22) is a bank: energy
+    # above ``reproduce_threshold * deposit_threshold_frac`` is moved into
+    # ``struct_deposit`` automatically at ``deposit_rate`` per tick, floored
+    # at the reproduce threshold (the creature keeps enough to split). The
+    # eat gate (output 2) withdraws from the creature's OWN house and raids
+    # a FOREIGN one at ``raid_rate`` — the flows are independent of the food
+    # budget (an open mouth eats AND banks/raids; conservation holds). A
+    # house whose owner creature is alive within ``guard_range`` cannot be
+    # drained from outside: guarding costs opportunity, never energy.
+    # Deposits above ``mark_threshold`` stamp a territorial mark ring
+    # (binary 1.0 within house_radius, scratch rebuilt every tick); standing
+    # on YOUR OWN mark discounts the metabolic bill by ``comfort`` — a
+    # physical fact of place, never a reward function. Defaults keep the
+    # pre-stage-25 economy: deposit_rate = 0 means no deposits ever exist,
+    # so every territory reading is an exact zero (bit-identical world).
+    deposit_rate: float = 0.5  # energy stored/withdrawn per tick at gate=1
+    raid_rate: float = 0.3  # energy stolen per tick at gate=1 (unguarded)
+    guard_range: float = 3.0  # world units: owner alive within blocks raids
+    comfort: float = 0.3  # metabolic discount on own mark, in [0, 1]
+    mark_threshold: float = 1.0  # deposit above which a house stamps its ring
+    deposit_threshold_frac: float = 1.1  # bank only above thr * frac energy
+    store_scale: float = 100.0  # store-input normalizer (saturates at thr)
+
     def __post_init__(self) -> None:
         if self.width <= 0.0 or self.height <= 0.0:
             raise ValueError("world dimensions must be positive")
@@ -539,6 +562,20 @@ class Config:
             raise ValueError("stress_scale must be positive")
         if self.grudge_decay < 0.0:
             raise ValueError("grudge_decay must be >= 0")
+        if self.deposit_rate < 0.0:
+            raise ValueError("deposit_rate must be >= 0")
+        if self.raid_rate < 0.0:
+            raise ValueError("raid_rate must be >= 0")
+        if self.guard_range < 0.0:
+            raise ValueError("guard_range must be >= 0")
+        if not 0.0 <= self.comfort <= 1.0:
+            raise ValueError("comfort must be in [0, 1]")
+        if self.mark_threshold < 0.0:
+            raise ValueError("mark_threshold must be >= 0")
+        if self.deposit_threshold_frac <= 0.0:
+            raise ValueError("deposit_threshold_frac must be positive")
+        if self.store_scale <= 0.0:
+            raise ValueError("store_scale must be positive")
 
     @property
     def grid_shape(self) -> tuple[int, int]:
@@ -556,11 +593,11 @@ class Config:
         ambient light — stage 10's circadian cue), 3 signal slots (smell +
         left/right antennas over the signal field, stage 13), 1 tag slot
         (hue similarity of the neighbours, stage 15), 1 wood slot (smell of
-        the wood field — stage 17) and, since stage 24, the affect pair
-        (stress, grudge): the victim's accumulated bite damage faded by
-        decay, and the hue similarity to its last attacker faded by
-        recency. Both are lifetime scratches, never inherited or saved."""
-        return self.n_rays * 3 + 16
+        the wood field — stage 17), the affect pair (stress, grudge —
+        stage 24) and, since stage 25, the signed store reading: the
+        deposit of the house underfoot (+ mine, - a foreign complete house,
+        0 elsewhere), normalised by store_scale."""
+        return self.n_rays * 3 + 17
 
     @property
     def brain_params(self) -> int:

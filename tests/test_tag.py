@@ -163,20 +163,23 @@ def test_rebuild_conserves_tag_vectors_over_the_grid() -> None:
         )
 
 
-def test_input_groups_ends_with_affect_pair() -> None:
+def test_input_groups_ends_with_store_after_affect_pair() -> None:
     """Stage 17 appended the wood smell slot after the tag slot; stage 24
-    appends stress and grudge after the wood."""
+    appended stress and grudge; stage 25 appends the signed store slot."""
     cfg = make_config()
     label, group = input_groups(cfg)[-1]
+    assert label == "store"
+    assert group == slice(3 * cfg.n_rays + 16, 3 * cfg.n_rays + 17)
+    label, group = input_groups(cfg)[-2]
     assert label == "grudge"
     assert group == slice(3 * cfg.n_rays + 15, 3 * cfg.n_rays + 16)
-    label, group = input_groups(cfg)[-2]
+    label, group = input_groups(cfg)[-3]
     assert label == "stress"
     assert group == slice(3 * cfg.n_rays + 14, 3 * cfg.n_rays + 15)
-    label, group = input_groups(cfg)[-3]
+    label, group = input_groups(cfg)[-4]
     assert label == "smell wood"
     assert group == slice(3 * cfg.n_rays + 13, 3 * cfg.n_rays + 14)
-    label, group = input_groups(cfg)[-4]
+    label, group = input_groups(cfg)[-5]
     assert label == "tag"
     assert group == slice(3 * cfg.n_rays + 12, 3 * cfg.n_rays + 13)
 

@@ -35,6 +35,16 @@ one row per recorded tick in pre-allocated int32/float32 columns:
                       bonus granted this tick, equal to the fuel burned)
     n_fire, n_house  (alive structure counts by type, gauges every tick,
                       stage 17 — the construction-emergence gates)
+    deposited        (per-tick delta of World.deposited, stage 25: energy
+                      banked into houses this tick, automatic above the
+                      deposit trigger)
+    raided           (per-tick delta of World.raided: energy taken out of
+                      unguarded foreign houses this tick)
+    energy_in_stores (current sum of struct_deposit over alive houses,
+                      gauge every tick — the bank the gates move energy in
+                      and out of; 0 with no deposits)
+    mark_cells       (cells covered by a territorial mark, gauge every
+                      tick — the ring's area, stage 25)
     bite_herb, bite_omni, bite_pred
                      (per-tick deltas of World.bite_by_diet, stage 12.5:
                      successful takes grouped by the *attacker's* diet class)
@@ -99,6 +109,7 @@ INT_COLUMNS = (
     "n_predator",
     "n_fire",
     "n_house",
+    "mark_cells",
     "matings_valid",
 )
 FLOAT_COLUMNS = (
@@ -136,6 +147,9 @@ FLOAT_COLUMNS = (
     "n_species",
     "barrier",
     "house_progress",  # mean completeness u of alive houses (stage 22)
+    "deposited",  # per-tick delta of World.deposited (stage 25 banks)
+    "raided",  # per-tick delta of World.raided (stage 25 raids)
+    "energy_in_stores",  # sum of struct_deposit over alive houses
 )
 COLUMNS = INT_COLUMNS + FLOAT_COLUMNS
 
@@ -197,6 +211,8 @@ class StatsRecorder:
         self._prev_donated = np.float64(0.0)  # energy_donated delta baseline
         self._prev_wood = np.float64(0.0)  # wood_gathered delta baseline
         self._prev_cooked = np.float64(0.0)  # energy_cooked delta baseline
+        self._prev_deposited = np.float64(0.0)  # deposited delta baseline
+        self._prev_raided = np.float64(0.0)  # raided delta baseline
         self._last_dist = np.float32(0.0)
         self._last_diet_p = (np.float32(0.0), np.float32(0.0), np.float32(0.0))
         self._last_n_species = np.float32(0.0)
@@ -358,6 +374,19 @@ class StatsRecorder:
             world.energy_cooked - self._prev_cooked
         )
         self._prev_cooked = np.float64(world.energy_cooked)
+        # stage-25 territory flows: energy banked and raided this tick
+        cols["deposited"][i] = np.float32(world.deposited - self._prev_deposited)
+        self._prev_deposited = np.float64(world.deposited)
+        cols["raided"][i] = np.float32(world.raided - self._prev_raided)
+        self._prev_raided = np.float64(world.raided)
+        cols["energy_in_stores"][i] = np.float32(
+            world.struct_deposit[
+                world.struct_alive & (world.struct_type == 1)
+            ].sum(dtype=np.float64)
+        )
+        cols["mark_cells"][i] = np.int32(
+            np.count_nonzero(world.mark)
+        )
         # mean hue alignment of this tick's gift pairs (stage 16 H2 gauge);
         # 0 without pairs — never NaN, so plots stay monotone-free of holes
         cols["donate_align"][i] = np.float32(

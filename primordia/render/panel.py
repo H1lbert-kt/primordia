@@ -416,7 +416,7 @@ def render_panel(
         "keys: space pause  . step",
         "1-4 / +-  sim speed",
         "wheel zoom  drag pan  click select",
-        "esc clear  f follow  g groups",
+        "esc clear  f follow  g groups  t terr",
     ):
         _text(dst, 16, line, x, y, settings.text_dim)
         y += 13

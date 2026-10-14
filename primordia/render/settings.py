@@ -92,6 +92,9 @@ class Settings:
     # donation gift lines (stage 16): cyan, distinct from the four
     # point-flash colors above (especially predation red)
     flash_donation: tuple[int, int, int] = (90, 210, 230)
+    # raid lines (stage 25): hot orange, distinct from donation cyan and
+    # predation point-flash red (a raid is a theft, not a kill)
+    flash_raid: tuple[int, int, int] = (255, 150, 50)
 
     # world sparkline (alive + mean energy, one sample per rendered frame)
     sparkline_samples: int = 300
@@ -106,6 +109,17 @@ class Settings:
     group_border_alpha: float = 0.55  # brighter alpha on frontier cells
     group_border_color: tuple[int, int, int] = (235, 235, 240)
     group_event_log: int = 6  # recent event lines in the viewport corner
+
+    # territory (stage 25): viewer-only banked-house overlay, default OFF —
+    # the mark ring and deposit bars are presentation of sim state the tick
+    # already computes; none of it feeds back. Press 't' in the viewer.
+    show_territory: bool = False
+    territory_overlay_alpha: float = 0.28  # wash over marked cells
+    deposit_bar_scale: float = 20.0  # world-energy units for a full bar
+    deposit_bar_width: int = 12  # bar length in pixels at any zoom
+    deposit_bar_height: int = 2
+    deposit_bar_color: tuple[int, int, int] = (120, 230, 160)
+    deposit_bar_bg: tuple[int, int, int] = (30, 34, 38)
 
     # simulation speed: ticks advanced per rendered frame
     speed_steps: tuple[int, ...] = (1, 2, 4, 8)

@@ -25,10 +25,10 @@ def make_config(**overrides: object) -> Config:
 def layout_pins() -> None:
     cfg = Config()
     assert Config.N_OUTPUTS == 8
-    assert cfg.sensor_input_dim == 37
+    assert cfg.sensor_input_dim == 38
     assert cfg.hidden_size == 8
-    assert cfg.brain_params == 440  # 8*38 + 8*9 + 8*8 (W1, W2, W_rec)
-    assert cfg.genome_size == 446  # + 6 body traits (stages 3-21)
+    assert cfg.brain_params == 448  # 8*39 + 8*9 + 8*8 (W1, W2, W_rec)
+    assert cfg.genome_size == 454  # + 6 body traits (stages 3-21)
     assert 100 <= cfg.brain_params <= 500
 
 

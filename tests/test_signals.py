@@ -156,12 +156,12 @@ def test_signal_config_validation() -> None:
 
 
 def test_brain_layout_signal_numbers() -> None:
-    """Formula guards: the layout pins from stage 13 grew through 15/17/24."""
+    """Formula guards: the layout pins from stage 13 grew through 15/17/24/25."""
     cfg = Config()
     assert Config.N_OUTPUTS == 8
-    assert cfg.sensor_input_dim == 37
-    assert cfg.brain_params == 440
-    assert cfg.genome_size == 446  # + 6 body traits (stages 3-21)
+    assert cfg.sensor_input_dim == 38
+    assert cfg.brain_params == 448
+    assert cfg.genome_size == 454  # + 6 body traits (stages 3-21)
     w = World(cfg, seed=0)
     assert w.actions.shape == (cfg.max_creatures, 8)
-    assert w.sensor_buf.shape == (cfg.max_creatures, 37)
+    assert w.sensor_buf.shape == (cfg.max_creatures, 38)

@@ -66,10 +66,11 @@ def test_layout_pins() -> None:
     cfg = Config()
     assert Config.N_OUTPUTS == 8  # accel, turn, eat, emit, donate, gather,
     # build_fire, build_house
-    assert cfg.sensor_input_dim == 37  # +stress/grudge at 3n+14/15 (stage 24)
+    assert cfg.sensor_input_dim == 38  # +stress/grudge at 3n+14/15 (stage 24),
+    # + store at 3n+16 (stage 25)
     assert cfg.hidden_size == 8
-    assert cfg.brain_params == 440  # 8*38 + 8*9 + 8*8 (W1, W2, W_rec)
-    assert cfg.genome_size == 446  # + 6 body traits (stages 3-21)
+    assert cfg.brain_params == 448  # 8*39 + 8*9 + 8*8 (W1, W2, W_rec)
+    assert cfg.genome_size == 454  # + 6 body traits (stages 3-21)
     assert 100 <= cfg.brain_params <= 500
     names = [name for name, _ in step.PHASES]
     assert len(names) == 22

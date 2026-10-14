@@ -22,13 +22,14 @@ pytest -q
 - **No fitness, no objectives.** Energy is the only currency: eat food (or
   meat), pay metabolic and movement costs, and split when you cross
   `reproduce_threshold`. Death = energy ≤ 0, `max_age`, or a predator's bite.
-- **Evolvable body and brain.** Each creature is a genome of 446 values: a
-  37-input network (7-ray food sum, creatures, prey and carrion peak
+- **Evolvable body and brain.** Each creature is a genome of 454 values: a
+  38-input network (7-ray food sum, creatures, prey and carrion peak
   channels, left/right food antennas, internal state, ambient light, three
   signal-field sensors, the hue similarity of neighbours in the smell
-  window, the wood smell of that same window, and — since stage 24 — two
-  bite scars: accumulated stress and a recency-faded rancor toward the
-  last attacker's hue) → 8 hidden units with
+  window, the wood smell of that same window, two bite scars — accumulated
+  stress and a recency-faded rancor toward the last attacker's hue — and,
+  since stage 25, a signed bank reading: + if you stand on your own banked
+  house, − on a foreign one) → 8 hidden units with
   Elman recurrence → turn, accelerate, eat/attack, emit signal, donate
   energy, gather wood, build a campfire, build a house — plus
   body traits: max speed, size, vision range, *diet* (0 = herbivore;
@@ -36,7 +37,9 @@ pytest -q
   heritable lineage hue — neutral by construction (nothing in the tick
   rewards it), shown as a ring under the sprite. The affect inputs are
   **information, not reward**: the channel is off by default and the
-  experiment that turned it on halved the population (stage 24, below).
+  experiment that turned it on halved the population (stage 24, below);
+  the bank input is a physical reading of energy the world already holds,
+  never a prize.
 - **Sex and aging, not just cloning.** Reproduction is sexual: an initiator
   above the threshold searches for a nearby partner, each parent pays half
   the child's energy, and the genome is a per-gene crossover plus mutation.
@@ -96,7 +99,11 @@ limitations in each experiment's README.
 > once more — the affect pair (stress + grudge) appended two inputs
 > (37 in), and the budget forced hidden 9 → 8, so the genome *shrank*
 > 491 → 446 (`FORMAT_VERSION 11`; the affect scratches themselves are
-> lifetime state and stay out of the save). The experiment
+> lifetime state and stay out of the save). Stage 25 added the territory
+> bank (a signed `store` input reading the energy banked underfoot,
+> 38 in, genome 446 → 454, `FORMAT_VERSION 12` — `struct_deposit` is
+> saved; the mark ring, mark owner and raid-flash map are scratch and
+> rebuilt). The experiment
 > scripts pin the old regime
 > off via `STAGE8_BASE` so the *regime* is preserved — but reruns on current
 > HEAD use the sexual dynamics; the original asexual runs stay in each
@@ -249,14 +256,18 @@ each); resuming from a checkpoint and continuing N ticks is
 
 Target: ≥ 30 ticks/s at 2000 creatures headless (i5-8265U, no GPU).
 
-| creatures | ticks/s (load 2.7, stage-22 defaults) |
+| creatures | ticks/s (load 2.5–3.0, stage-25 defaults) |
 |---|---|
 | 500 | 617–846 |
 | 2000 | 168–530 |
 | 5000 | 104–203 |
 
 Numbers vary 2–4× between processes depending on machine load (this box runs
-a desktop session); compare A/B in the same session. Stage 22's rebuild
+a desktop session); compare A/B in the same session. Stage 25's territory
+pass (automatic banking, withdraw/raid on the eat-gate, the local guard
+scan, the metabolic comfort discount, the mark rebuild) rides the existing
+phase structure — no new phase, no new allocation — and the floor holds
+with ~10× margin (617/318/162 at load 2.5–3.0). Stage 22's rebuild
 (additive delivery logic, rot, the hauling tax) leaves the default world
 bit-identical — `alive_final` 98/693/1166 matches the stage-21 HEAD exactly
 — and the floor holds with 5× margin. Stage 17 added five
@@ -293,6 +304,8 @@ python experiments/plasticity/run.py --ticks 10000  # stage 21: Oja ablation (~1
 python experiments/plasticity/run.py --phase clones
 python experiments/houses/run.py --phase pilot       # stage 22: incremental houses (null)
 python experiments/groups/run.py --force             # stage 23: founder groups/borders (null)
+python experiments/affect/run.py                     # stage 24: stress+rancor (gate FAIL)
+python experiments/territory/run.py --ticks 10000    # stage 25: bank/raid/mark (context null)
 
 # stats + plots
 python run.py --seed 42 --headless --ticks 5000 --stats s42.npz
@@ -325,7 +338,7 @@ primordia/
   database.py # stage-19 SQLite world store (daemon checkpoints + timeline)
   observer.py # stage-23 hue-group observer (frontiers/events, off-tick)
   render/     # pygame viewer + headless GIF recorder (never imported by core)
-tests/        # 289 tests: determinism, invariants, save/load, guards
+tests/        # 311 tests: determinism, invariants, save/load, guards
 experiments/  # one script + README per experiment
 run.py        # CLI: --seed --headless --ticks --load --save --stats
               #      --config --record --screenshot --select
@@ -399,10 +412,19 @@ the pre-stage-24 default world still reads zeros; on the proto-culture
 world the channel is *causally read* (bit-identical until the first
 bite, then divergent) and even cuts predation deaths in 2/3 seeds, but
 halves the population in 3/3 — HARD GATE FAIL, default stays off,
-in `experiments/affect/`). The "real world"
-roadmap continues with territory (stage 25, revised: physical deposits,
-viewer overlay off by default — the old stage-20 sketch is absorbed).
-Known open
+in `experiments/affect/`), and the territory bank (stage 25: surplus
+energy above the reproduce threshold banks itself into the creature's
+own complete house, the eat-gate mouth also withdraws from its own bank
+or raids an unguarded foreign one, a living owner within guard range
+makes the bank drain-proof, a mark ring stains the ground over banked
+houses, and standing on your own mark trims the metabolic bill — on the
+proto-culture world the mechanism demonstrably moves energy (2296 banked,
+61 raided, 45 marked cells on the surviving seed) and correlates with 4×
+the control's population there, but the off control itself goes extinct
+on the other seed, so the pre-registered hard gate fails for the
+*context*, not the treatment: a stable-context sweep is the honest next
+step, in `experiments/territory/`, with a `t` toggle for the territory
+overlay in the viewer). Known open
 problems are documented above (predation still a trickle, creatures still
 circle) rather than hidden.
 

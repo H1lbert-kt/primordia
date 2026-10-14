@@ -37,12 +37,21 @@ Input vector layout (``Config.sensor_input_dim`` floats, written into
                               exp(-stress_decay) each tick. Exact 0 without
                               affect_enabled or before the first bite.
     [3n+15 : 3n+16)          grudge (stage 24): circular hue similarity to the
-                              last attacker, cos(2*pi*(hue_me - hue_them)),
-                              faded by exp(-grudge_decay * ticks since the
-                              bite): +1 = a creature of my own colour hit me
-                              recently, -1 = the opposite colour, 0 = no
-                              memory (never bitten, or the recency decayed).
-                              Information only — no scoreboard, no reward.
+                               last attacker, cos(2*pi*(hue_me - hue_them)),
+                               faded by exp(-grudge_decay * ticks since the
+                               bite): +1 = a creature of my own colour hit me
+                               recently, -1 = the opposite colour, 0 = no
+                               memory (never bitten, or the recency decayed).
+                               Information only — no scoreboard, no reward.
+    [3n+16 : 3n+17)          store (stage 25): the bank underfoot, signed —
+                               +min(deposit, store_scale)/store_scale on a
+                               COMPLETE house I own, the negative of that on
+                               a foreign complete house, 0 everywhere else
+                               (fires, incomplete houses, open ground, and
+                               any cell while no deposit exists). The brain
+                               reads "how much energy is stored here, and is
+                               it mine" without the tick ever scoring the
+                               behaviour.
 
 Rays march in steps of one cell up to the creature's ``vision_range`` body
 trait times the current light level ``L(t)`` (seeing in the dark is seeing
@@ -94,6 +103,7 @@ def input_groups(config: Config) -> tuple[tuple[str, slice | np.ndarray], ...]:
         ("smell wood", slice(smell + 13, smell + 14)),
         ("stress", slice(smell + 14, smell + 15)),
         ("grudge", slice(smell + 15, smell + 16)),
+        ("store", slice(smell + 16, smell + 17)),
     )
 
 
@@ -140,12 +150,21 @@ def perceive(
     stress_scale: np.float32,
     grudge_decay: np.float32,
     affect_enabled: bool,
+    struct_grid: np.ndarray,
+    struct_type: np.ndarray,
+    struct_alive: np.ndarray,
+    struct_owner: np.ndarray,
+    struct_deposit: np.ndarray,
+    struct_store: np.ndarray,
+    creature_id: np.ndarray,
+    store_scale: np.float32,
 ) -> None:
     """Fill ``sensor_buf[i]`` for every living creature (parallel over slots)."""
     inv_cap = np.float32(1.0) / food_capacity
     inv_e = np.float32(1.0) / energy_scale
     inv_wood = np.float32(1.0) / wood_capacity
     inv_scale = np.float32(1.0) / stress_scale
+    inv_store = np.float32(1.0) / store_scale
     inv_two_pi = np.float32(2.0 * np.pi)
     smell_side = 2 * smell_r + 1
     inv_smell = np.float32(1.0) / (smell_side * smell_side)
@@ -337,3 +356,26 @@ def perceive(
         else:
             sensor_buf[i, base + 14] = 0.0
             sensor_buf[i, base + 15] = 0.0
+
+        # territory (stage 25): the bank underfoot, signed by possession.
+        # Deposits only ever sit in complete (immortal) houses and start at
+        # 0, so a zeroed struct_deposit makes this an exact 0 for every
+        # creature — the pre-stage-25 forward is untouched (no RNG, no
+        # branch on Config: it is a physical reading, not a rule).
+        s_slot = struct_grid[iy0, ix0]
+        if (
+            s_slot >= 0
+            and struct_alive[s_slot]
+            and struct_type[s_slot] == 1
+            and struct_store[s_slot] >= 1.0
+            and struct_deposit[s_slot] > 0.0
+        ):
+            d = struct_deposit[s_slot] * inv_store
+            if d > 1.0:
+                d = np.float32(1.0)
+            if struct_owner[s_slot] == creature_id[i]:
+                sensor_buf[i, base + 16] = d
+            else:
+                sensor_buf[i, base + 16] = -d
+        else:
+            sensor_buf[i, base + 16] = 0.0

@@ -39,11 +39,11 @@ def _bite_pair(hue_victim: float = 0.5, hue_attacker: float = 0.25,
 
 def test_layout_pins() -> None:
     cfg = Config()
-    assert cfg.sensor_input_dim == 37
+    assert cfg.sensor_input_dim == 38
     assert cfg.hidden_size == 8
-    assert cfg.brain_params == 440
-    assert cfg.genome_size == 446
-    assert cfg.plastic_params == 8 * 37 + 8 * 8
+    assert cfg.brain_params == 448
+    assert cfg.genome_size == 454
+    assert cfg.plastic_params == 8 * 38 + 8 * 8
     assert cfg.affect_enabled is False
     assert cfg.stress_decay == pytest.approx(0.02)
     assert cfg.stress_scale == pytest.approx(1.0)
@@ -73,6 +73,7 @@ def test_input_groups_cover_all_inputs() -> None:
     by_name = dict(groups)
     assert by_name["stress"].start == 3 * cfg.n_rays + 14
     assert by_name["grudge"].start == 3 * cfg.n_rays + 15
+    assert by_name["store"].start == 3 * cfg.n_rays + 16
 
 
 def test_bite_fills_victim_scratches() -> None:
